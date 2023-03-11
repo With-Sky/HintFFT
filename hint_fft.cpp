@@ -8,6 +8,7 @@
 
 #define TABLE_TYPE 2
 // #define FFT_R2_TEMPLATE
+
 namespace hint
 {
     using Complex = std::complex<double>; // 使用标准库的complex作为复数类
@@ -75,9 +76,31 @@ namespace hint
         }
         std::memcpy(target, source, len * sizeof(T));
     }
+    // 从其他类型数组拷贝到复数组
+    template <typename T>
+    inline void com_ary_combine_copy(Complex *target, const T &source1, size_t len1, const T &source2, size_t len2)
+    {
+        size_t min_len = std::min(len1, len2);
+        size_t i = 0;
+        while (i < min_len)
+        {
+            target[i] = Complex(source1[i], source2[i]);
+            i++;
+        }
+        while (i < len1)
+        {
+            target[i].real(source1[i]);
+            i++;
+        }
+        while (i < len2)
+        {
+            target[i].imag(source2[i]);
+            i++;
+        }
+    }
     namespace hint_transform
     {
-        
+
         class ComplexTable
         {
         private:
@@ -1299,42 +1322,50 @@ using namespace std;
 using namespace hint;
 using namespace hint_transform;
 
+template <typename T>
+vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
+{
+    size_t len1 = in1.size(), len2 = in2.size(), out_len = len1 + len2 - 1;
+    vector<T> result(out_len);
+    size_t fft_len = min_2pow(out_len);
+    Complex *fft_ary = new Complex[fft_len];
+    com_ary_combine_copy(fft_ary, in1, len1, in2, len2);
+    // fft_radix2_dif_lut(fft_ary, fft_len, false); // 经典FFT
+    fft_dif(fft_ary, fft_len, false); // 优化FFT
+    for (size_t i = 0; i < fft_len; i++)
+    {
+        Complex tmp = fft_ary[i];
+        tmp *= tmp;
+        fft_ary[i] = std::conj(tmp);
+    }
+    // fft_radix2_dit_lut(fft_ary, fft_len, false); // 经典FFT
+    fft_dit(fft_ary, fft_len, false); // 优化FFT
+    double inv = -0.5 / fft_len;
+    for (size_t i = 0; i < out_len; i++)
+    {
+        result[i] = static_cast<T>(fft_ary[i].imag() * inv + 0.5);
+    }
+    delete[] fft_ary;
+    return result;
+}
+
 int main()
 {
     StopWatch w(1000);
-    int n = 23;
+    int n = 0;
     cin >> n;
     size_t len = 1 << n;
-    Complex *ary1 = new Complex[1 << 23];
-    Complex *ary2 = new Complex[1 << 23];
     uint64_t ele = 9999;
-    for (size_t i = 0; i < len / 2; i++)
-    {
-        ary2[i] = ary1[i] = Complex(ele, ele);
-    }
+    vector<uint64_t> in1(len / 2, ele);
+    vector<uint64_t> in2(len / 2, ele);
     w.start();
-    // fft_radix2_dif_lut(ary1, len, false); // 经典FFT
-    fft_dif(ary1, len, false); // 优化FFT
-    for (size_t i = 0; i < len; i++)
-    {
-        Complex tmp = ary1[i];
-        tmp *= tmp;
-        ary1[i] = std::conj(tmp);
-    }
-    // fft_radix2_dit_lut(ary1, len, false); // 经典FFT
-    fft_dit(ary1, len, false); // 优化FFT
-    double inv = 1.0 / len;
-    for (size_t i = 0; i < len; i++)
-    {
-        ary1[i] = std::conj(ary1[i] * inv);
-        // std::cout << ary1[i] << "\n";
-    }
+    vector<uint64_t> res = poly_multiply(in1, in2);
     w.stop();
     // 验证卷积结果
     for (size_t i = 0; i < len / 2; i++)
     {
         uint64_t x = (i + 1) * ele * ele;
-        uint64_t y = static_cast<uint64_t>(ary1[i].imag() / 2 + 0.5);
+        uint64_t y = res[i];
         if (x != y)
         {
             cout << "fail:" << i << "\t" << (i + 1) * ele * ele << "\t" << y << "\n";
@@ -1344,7 +1375,7 @@ int main()
     for (size_t i = len / 2; i < len; i++)
     {
         uint64_t x = (len - i - 1) * ele * ele;
-        uint64_t y = static_cast<uint64_t>(ary1[i].imag() / 2 + 0.5);
+        uint64_t y = res[i];
         if (x != y)
         {
             cout << "fail:" << i << "\t" << x << "\t" << y << "\n";
