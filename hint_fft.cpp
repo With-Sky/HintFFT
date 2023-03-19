@@ -6,18 +6,59 @@
 #include <cstring>
 #include "stopwatch.hpp"
 
-#define TABLE_TYPE 2
-// #define FFT_R2_TEMPLATE
+#define TABLE_TYPE 0
+#define MULTITHREAD 0     // 0 means no, 1 means yes
+#define TABLE_TYPE 1      // 0 means ComplexTable, 1 means ComplexTableX,2 means ComplexTableZ
+#define TABLE_PRELOAD 1   // 0 means no, 1 means yes
+#define FFT_R2_TEMPLATE 0 // 0 means no, 1 means yes  
 
 namespace hint
 {
-    using Complex = std::complex<double>; // 使用标准库的complex作为复数类
-    using INT_32 = int32_t;
+    using UINT_8 = uint8_t;
+    using UINT_16 = uint16_t;
     using UINT_32 = uint32_t;
+    using UINT_64 = uint64_t;
+    using INT_32 = int32_t;
+    using INT_64 = int64_t;
+    using ULONG = unsigned long;
+    using LONG = long;
+    using Complex = std::complex<double>;
+
+    constexpr UINT_64 HINT_CHAR_BIT = 8;
+    constexpr UINT_64 HINT_SHORT_BIT = 16;
+    constexpr UINT_64 HINT_INT_BIT = 32;
+    constexpr UINT_64 HINT_INT8_0XFF = UINT8_MAX;
+    constexpr UINT_64 HINT_INT8_0X10 = (UINT8_MAX + 1ull);
+    constexpr UINT_64 HINT_INT16_0XFF = UINT16_MAX;
+    constexpr UINT_64 HINT_INT16_0X10 = (UINT16_MAX + 1ull);
+    constexpr UINT_64 HINT_INT32_0XFF = UINT32_MAX;
+    constexpr UINT_64 HINT_INT32_0X01 = 1;
+    constexpr UINT_64 HINT_INT32_0X80 = 0X80000000ull;
+    constexpr UINT_64 HINT_INT32_0X7F = INT32_MAX;
+    constexpr UINT_64 HINT_INT32_0X10 = (UINT32_MAX + 1ull);
+    constexpr UINT_64 HINT_INT64_0X80 = INT64_MIN;
+    constexpr UINT_64 HINT_INT64_0X7F = INT64_MAX;
+    constexpr UINT_64 HINT_INT64_0XFF = UINT64_MAX;
 
     constexpr double HINT_PI = 3.1415926535897932384626433832795;
     constexpr double HINT_2PI = HINT_PI * 2;
+    constexpr double HINT_HSQ_ROOT2 = 0.70710678118654752440084436210485;
 
+    constexpr UINT_64 NTT_MOD1 = 3221225473;
+    constexpr UINT_64 NTT_ROOT1 = 5;
+    constexpr UINT_64 NTT_MOD2 = 3489660929;
+    constexpr UINT_64 NTT_ROOT2 = 3;
+    constexpr size_t NTT_MAX_LEN = 1ull << 28;
+
+#if MULTITHREAD == 1
+    const UINT_32 hint_threads = std::thread::hardware_concurrency();
+    const UINT_32 log2_threads = std::ceil(hint_log2(hint_threads));
+    std::atomic<UINT_32> cur_ths;
+#endif
+
+    /// @brief 生成不大于n的最大的2的幂次的数
+    /// @param n
+    /// @return 不大于n的最大的2的幂次的数
     template <typename T>
     constexpr T max_2pow(T n)
     {
@@ -29,6 +70,9 @@ namespace hint
         }
         return res;
     }
+    /// @brief 生成不小于n的最小的2的幂次的数
+    /// @param n
+    /// @return 不小于n的最小的2的幂次的数
     template <typename T>
     constexpr T min_2pow(T n)
     {
@@ -38,19 +82,6 @@ namespace hint
             res *= 2;
         }
         return res;
-    }
-    template <typename T>
-    inline T *ary_realloc(T *ptr, size_t len)
-    {
-        if (len * sizeof(T) < INT64_MAX)
-        {
-            ptr = static_cast<T *>(realloc(ptr, len * sizeof(T)));
-        }
-        if (ptr == nullptr)
-        {
-            throw("realloc error");
-        }
-        return ptr;
     }
     template <typename T>
     constexpr size_t hint_log2(T n)
@@ -63,6 +94,7 @@ namespace hint
         }
         return res;
     }
+    // 模板数组拷贝
     template <typename T>
     void ary_copy(T *target, const T *source, size_t len)
     {
@@ -98,9 +130,45 @@ namespace hint
             i++;
         }
     }
+    // 数组交错重排
+    template <UINT_64 N, typename T>
+    void ary_interlace(T ary[], size_t len)
+    {
+        size_t sub_len = len / N;
+        T *tmp_ary = new T[len - sub_len];
+        for (size_t i = 0; i < len; i += N)
+        {
+            ary[i / N] = ary[i];
+            for (size_t j = 0; j < N - 1; j++)
+            {
+                tmp_ary[j * sub_len + i / N] = ary[i + j + 1];
+            }
+        }
+        ary_copy(ary + sub_len, tmp_ary, len - sub_len);
+        delete[] tmp_ary;
+    }
+    // 数组分块
+    template <size_t CHUNK, typename T1, typename T2>
+    void ary_chunk_split(T1 input[], T2 output[], size_t in_len)
+    {
+        // 将输入数组视为一整块连续的数据,从第一个比特开始,每CHUNK个bit为一组，依次放到输出结果数组中
+        if (sizeof(T1) < CHUNK)
+        {
+            return;
+        }
+        constexpr T1 MAX = (1 << (CHUNK - 1)) - 1 + (1 << (CHUNK - 1)); // 二进制CHUNK bit全为1的数
+
+        T1 mask = MAX;
+    }
+    // 分块合并
+    template <size_t CHUNK, typename T1, typename T2>
+    void ary_chunk_merge(T1 input[], T2 output[], size_t in_len)
+    {
+        // 将输入数组的元素视为一个个CHUNK bit的数据,从第一个比特开始,依次连续放到输出结果数组中
+    }
+    // FFT与类FFT变换的命名空间
     namespace hint_transform
     {
-
         class ComplexTable
         {
         private:
@@ -123,9 +191,16 @@ namespace hint
                 size_t ary_size = 1ull << (max_shift - 1);
                 table.resize(ary_size);
                 table[0] = Complex(1);
+#if TABLE_PRELOAD == 1
                 expend(max_shift);
+#endif
             }
             void expend(INT_32 shift)
+            {
+                // expand1(shift);
+                expand2(shift);
+            }
+            void expand1(INT_32 shift)
             {
                 shift = std::max<INT_32>(shift, 3);
                 if (shift > max_log_size)
@@ -139,6 +214,28 @@ namespace hint
                     {
                         table[vec_size + pos] = unit_root(len, pos);
                     }
+                }
+                cur_log_size = std::max(cur_log_size, shift);
+            }
+            void expand2(INT_32 shift)
+            {
+                shift = std::max<INT_32>(shift, 3);
+                if (shift > max_log_size)
+                {
+                    throw("FFT length too long for lut\n");
+                }
+                for (INT_32 i = cur_log_size + 1; i <= shift; i++)
+                {
+                    size_t len = 1ull << i, vec_size = len / 4;
+                    table[vec_size] = Complex(1, 0);
+                    for (size_t pos = 1; pos < vec_size / 2; pos++)
+                    {
+                        double cos_theta = std::cos(HINT_2PI * pos / len);
+                        double sin_theta = std::sin(HINT_2PI * pos / len);
+                        table[vec_size + pos] = Complex(cos_theta, sin_theta);
+                        table[vec_size * 2 - pos] = Complex(sin_theta, cos_theta);
+                    }
+                    table[vec_size + vec_size / 2] = unit_root(len, len / 8);
                 }
                 cur_log_size = std::max(cur_log_size, shift);
             }
@@ -254,7 +351,9 @@ namespace hint
                 max_log_size = max_shift;
                 table.resize(max_shift + 1);
                 table[0] = table[1] = std::vector<Complex>({1});
+#if TABLE_PRELOAD == 1
                 expend(max_shift);
+#endif
             }
             void expend(INT_32 shift)
             {
@@ -320,7 +419,9 @@ namespace hint
                 size_t vec_size = (1 << (max_shift - 1)) * FAC;
                 table.resize(vec_size);
                 table[0] = table[1] = Complex(1, 0), table[2] = Complex(0, 1);
+#if TABLE_PRELOAD == 1
                 expend(max_shift);
+#endif
             }
             void expend(INT_32 shift)
             {
@@ -372,7 +473,7 @@ namespace hint
 #elif TABLE_TYPE == 2
         static ComplexTableZ TABLE(lut_max_rank);
 #endif
-
+        // 二进制逆序
         template <typename T>
         void binary_inverse_swap(T &ary, size_t len)
         {
@@ -391,6 +492,27 @@ namespace hint
                     std::swap(ary[i], ary[j]);
                 }
             }
+        }
+        // 四进制逆序
+        template <typename SizeType = UINT_32, typename T>
+        void quaternary_inverse_swap(T &ary, size_t len)
+        {
+            SizeType log_n = hint_log2(len);
+            SizeType *rev = new SizeType[len / 4];
+            rev[0] = 0;
+            for (SizeType i = 1; i < len; i++)
+            {
+                SizeType index = (rev[i >> 2] >> 2) | ((i & 3) << (log_n - 2)); // 求rev交换数组
+                if (i < len / 4)
+                {
+                    rev[i] = index;
+                }
+                if (i < index)
+                {
+                    std::swap(ary[i], ary[index]);
+                }
+            }
+            delete[] rev;
         }
         // 2点fft
         inline void fft_2point(Complex &sum, Complex &diff)
@@ -922,6 +1044,60 @@ namespace hint
                 input[i] /= len;
             }
         }
+        // 经典模板,学习用
+        void fft_radix2_dit(Complex *input, size_t fft_len)
+        {
+            fft_len = max_2pow(fft_len);
+            binary_inverse_swap(input, fft_len);
+            for (size_t rank = 1; rank < fft_len; rank *= 2)
+            {
+                // rank表示上一级fft的长度,gap表示由两个上一级可以迭代计算出这一级的长度
+                size_t gap = rank * 2;
+                Complex unit_omega = std::polar<double>(1, -HINT_2PI / gap);
+                for (size_t begin = 0; begin < fft_len; begin += gap)
+                {
+                    Complex omega = Complex(1, 0);
+                    for (size_t pos = begin; pos < begin + rank; pos++)
+                    {
+                        fft_radix2_dit_butterfly(omega, input + pos, rank);
+                        omega *= unit_omega;
+                    }
+                }
+            }
+        }
+        // 基4快速傅里叶变换,模板,学习用
+        void fft_radix4_dit(Complex *input, size_t fft_len)
+        {
+            size_t log4_len = hint_log2(fft_len) / 2;
+            fft_len = 1ull << (log4_len * 2);
+            quaternary_inverse_swap(input, fft_len);
+            for (size_t pos = 0; pos < fft_len; pos += 4)
+            {
+                fft_4point(input + pos, 1);
+            }
+            for (size_t rank = 4; rank < fft_len; rank *= 4)
+            {
+                // rank表示上一级fft的长度,gap表示由四个上一级可以迭代计算出这一级的长度
+                size_t gap = rank * 4;
+                Complex unit_omega = std::polar<double>(1, -HINT_2PI / gap);
+                Complex unit_sqr = std::polar<double>(1, -HINT_2PI * 2 / gap);
+                Complex unit_cube = std::polar<double>(1, -HINT_2PI * 3 / gap);
+                for (size_t begin = 0; begin < fft_len; begin += gap)
+                {
+                    fft_4point(input + begin, rank);
+                    Complex omega = unit_omega;
+                    Complex omega_sqr = unit_sqr;
+                    Complex omega_cube = unit_cube;
+                    for (size_t pos = begin + 1; pos < begin + rank; pos++)
+                    {
+                        fft_radix4_dit_butterfly(omega, omega_sqr, omega_cube, input + pos, rank);
+                        omega *= unit_omega;
+                        omega_sqr *= unit_sqr;
+                        omega_cube *= unit_cube;
+                    }
+                }
+            }
+        }
         // 基2查时间抽取FFT
         void fft_radix2_dit_lut(Complex *input, size_t fft_len, bool bit_inv = true)
         {
@@ -954,7 +1130,6 @@ namespace hint
                     for (size_t pos = begin + 1; pos < begin + rank; pos++)
                     {
                         Complex omega = TABLE.get_complex_conj(log_len, pos - begin);
-
                         fft_radix2_dit_butterfly(omega, input + pos, rank);
                         fft_radix2_dit_butterfly(omega, input + pos + gap, rank);
                     }
@@ -1015,7 +1190,7 @@ namespace hint
                 binary_inverse_swap(input, fft_len);
             }
         }
-#ifdef FFT_R2_TEMPLATE
+#if FFT_R2_TEMPLATE == 1
         // FFT最外层循环模板展开
         template <size_t RANK, size_t LEN>
         struct FFT_LOOP1
@@ -1124,9 +1299,9 @@ namespace hint
             fft_split_radix_dit_template<quarter_len>(input + half_len + quarter_len);
             for (size_t i = 0; i < quarter_len; i++)
             {
-                Complex omega0 = TABLE.get_complex_conj(log_len, i);
-                Complex omega_cube0 = TABLE.get_complex_conj(log_len, i * 3);
-                fft_split_radix_dit_butterfly(omega0, omega_cube0, input + i, quarter_len);
+                Complex omega = TABLE.get_complex_conj(log_len, i);
+                Complex omega_cube = TABLE.get_complex_conj(log_len, i * 3);
+                fft_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
             }
         }
         template <>
@@ -1151,7 +1326,7 @@ namespace hint
         template <>
         void fft_split_radix_dit_template<16>(Complex *input)
         {
-#ifdef FFT_R2_TEMPLATE
+#if FFT_R2_TEMPLATE == 1
             fft_radix2_dit_template<16>(input);
 #else
             fft_dit_16point(input, 1);
@@ -1160,7 +1335,7 @@ namespace hint
         template <>
         void fft_split_radix_dit_template<32>(Complex *input)
         {
-#ifdef FFT_R2_TEMPLATE
+#if FFT_R2_TEMPLATE == 1
             fft_radix2_dit_template<32>(input);
 #else
             fft_dit_32point(input, 1);
@@ -1175,9 +1350,9 @@ namespace hint
             constexpr size_t half_len = LEN / 2, quarter_len = LEN / 4;
             for (size_t i = 0; i < quarter_len; i++)
             {
-                Complex omega0 = TABLE.get_complex_conj(log_len, i);
-                Complex omega_cube0 = TABLE.get_complex_conj(log_len, i * 3);
-                fft_split_radix_dif_butterfly(omega0, omega_cube0, input + i, quarter_len);
+                Complex omega = TABLE.get_complex_conj(log_len, i);
+                Complex omega_cube = TABLE.get_complex_conj(log_len, i * 3);
+                fft_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
             }
             fft_split_radix_dif_template<half_len>(input);
             fft_split_radix_dif_template<quarter_len>(input + half_len);
@@ -1205,7 +1380,7 @@ namespace hint
         template <>
         void fft_split_radix_dif_template<16>(Complex *input)
         {
-#ifdef FFT_R2_TEMPLATE
+#if FFT_R2_TEMPLATE == 1
             fft_radix2_dif_template<16>(input);
 #else
             fft_dif_16point(input, 1);
@@ -1214,7 +1389,7 @@ namespace hint
         template <>
         void fft_split_radix_dif_template<32>(Complex *input)
         {
-#ifdef FFT_R2_TEMPLATE
+#if FFT_R2_TEMPLATE == 1
             fft_radix2_dif_template<32>(input);
 #else
             fft_dif_32point(input, 1);
@@ -1222,40 +1397,32 @@ namespace hint
         }
 
         template <size_t LEN = 1>
-        void fft_dit_template(Complex *input, size_t fft_len, bool bit_inv = true)
+        void fft_dit_template(Complex *input, size_t fft_len)
         {
             if (fft_len > LEN)
             {
-                fft_dit_template<LEN * 2>(input, fft_len, bit_inv);
+                fft_dit_template<LEN * 2>(input, fft_len);
                 return;
             }
             TABLE.expend(hint_log2(LEN));
-            if (bit_inv)
-            {
-                binary_inverse_swap(input, LEN);
-            }
             fft_split_radix_dit_template<LEN>(input);
         }
         template <>
-        void fft_dit_template<1 << 24>(Complex *input, size_t fft_len, bool bit_inv) {}
+        void fft_dit_template<1 << 24>(Complex *input, size_t fft_len) {}
 
         template <size_t LEN = 1>
-        void fft_dif_template(Complex *input, size_t fft_len, bool bit_inv = true)
+        void fft_dif_template(Complex *input, size_t fft_len)
         {
             if (fft_len > LEN)
             {
-                fft_dif_template<LEN * 2>(input, fft_len, bit_inv);
+                fft_dif_template<LEN * 2>(input, fft_len);
                 return;
             }
             TABLE.expend(hint_log2(LEN));
             fft_split_radix_dif_template<LEN>(input);
-            if (bit_inv)
-            {
-                binary_inverse_swap(input, LEN);
-            }
         }
         template <>
-        void fft_dif_template<1 << 24>(Complex *input, size_t fft_len, bool is_ifft) {}
+        void fft_dif_template<1 << 24>(Complex *input, size_t fft_len) {}
 
         /// @brief 时间抽取基2fft
         /// @param input 复数组
@@ -1264,7 +1431,11 @@ namespace hint
         inline void fft_dit(Complex *input, size_t fft_len, bool bit_inv = true)
         {
             fft_len = max_2pow(fft_len);
-            fft_dit_template<1>(input, fft_len, bit_inv);
+            if (bit_inv)
+            {
+                binary_inverse_swap(input, fft_len);
+            }
+            fft_dit_template<1>(input, fft_len);
         }
 
         /// @brief 频率抽取基2fft
@@ -1274,7 +1445,11 @@ namespace hint
         inline void fft_dif(Complex *input, size_t fft_len, bool bit_inv = true)
         {
             fft_len = max_2pow(fft_len);
-            fft_dif_template<1>(input, fft_len, bit_inv);
+            fft_dif_template<1>(input, fft_len);
+            if (bit_inv)
+            {
+                binary_inverse_swap(input, fft_len);
+            }
         }
         /// @brief 快速傅里叶变换
         /// @param input 复数组
@@ -1344,8 +1519,8 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 int main()
 {
     StopWatch w(1000);
-    int n = 0;
-    cin >> n;
+    int n = 18;
+    // cin >> n;
     size_t len = 1 << n;
     uint64_t ele = 9;
     vector<uint32_t> in1(len / 2, ele);
