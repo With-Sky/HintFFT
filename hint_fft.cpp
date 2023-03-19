@@ -6,11 +6,10 @@
 #include <cstring>
 #include "stopwatch.hpp"
 
-#define TABLE_TYPE 0
 #define MULTITHREAD 0     // 0 means no, 1 means yes
 #define TABLE_TYPE 1      // 0 means ComplexTable, 1 means ComplexTableX,2 means ComplexTableZ
 #define TABLE_PRELOAD 1   // 0 means no, 1 means yes
-#define FFT_R2_TEMPLATE 0 // 0 means no, 1 means yes  
+#define FFT_R2_TEMPLATE 0 // 0 means no, 1 means yes
 
 namespace hint
 {
