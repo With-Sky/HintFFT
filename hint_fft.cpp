@@ -6,9 +6,9 @@
 #include <cstring>
 #include "stopwatch.hpp"
 
-#define MULTITHREAD 0     // 0 means no, 1 means yes
-#define TABLE_TYPE 0      // 0 means ComplexTable, 1 means ComplexTableX,2 means ComplexTableZ
-#define TABLE_PRELOAD 1   // 0 means no, 1 means yes
+#define MULTITHREAD 0   // 多线程 0 means no, 1 means yes
+#define TABLE_TYPE 1    // 复数表的类型 0 means ComplexTable, 1 means ComplexTableX,2 means ComplexTableZ
+#define TABLE_PRELOAD 1 // 是否提前初始化表 0 means no, 1 means yes
 
 namespace hint
 {
@@ -48,12 +48,6 @@ namespace hint
     constexpr UINT_64 NTT_ROOT2 = 3;
     constexpr size_t NTT_MAX_LEN = 1ull << 28;
 
-#if MULTITHREAD == 1
-    const UINT_32 hint_threads = std::thread::hardware_concurrency();
-    const UINT_32 log2_threads = std::ceil(hint_log2(hint_threads));
-    std::atomic<UINT_32> cur_ths;
-#endif
-
     /// @brief 生成不大于n的最大的2的幂次的数
     /// @param n
     /// @return 不大于n的最大的2的幂次的数
@@ -92,6 +86,12 @@ namespace hint
         }
         return res;
     }
+#if MULTITHREAD == 1
+    const UINT_32 hint_threads = std::thread::hardware_concurrency();
+    const UINT_32 log2_threads = std::ceil(hint_log2(hint_threads));
+    std::atomic<UINT_32> cur_ths;
+#endif
+
     // 模板数组拷贝
     template <typename T>
     void ary_copy(T *target, const T *source, size_t len)
@@ -174,8 +174,6 @@ namespace hint
             INT_32 max_log_size = 2;
             INT_32 cur_log_size = 2;
 
-            static constexpr double PI = HINT_PI;
-
             ComplexTable(const ComplexTable &) = delete;
             ComplexTable &operator=(const ComplexTable &) = delete;
 
@@ -245,7 +243,7 @@ namespace hint
             // 返回单位圆上平分m份的第n个
             static Complex unit_root(size_t m, size_t n)
             {
-                return unit_root((2.0 * PI * n) / m);
+                return unit_root((2.0 * HINT_PI * n) / m);
             }
             // shift表示圆平分为1<<shift份,n表示第几个单位根
             Complex get_complex(UINT_32 shift, size_t n) const
@@ -335,7 +333,6 @@ namespace hint
             INT_32 cur_log_size = 1;
 
             static constexpr size_t FAC = 3;
-            static constexpr double PI = HINT_PI;
 
             ComplexTableX(const ComplexTableX &) = delete;
             ComplexTableX &operator=(const ComplexTableX &) = delete;
@@ -348,7 +345,7 @@ namespace hint
                 max_shift = std::max<size_t>(max_shift, 1);
                 max_log_size = max_shift;
                 table.resize(max_shift + 1);
-                table[0] = table[1] = std::vector<Complex>({1});
+                table[0] = table[1] = std::vector<Complex>{1};
 #if TABLE_PRELOAD == 1
                 expend(max_shift);
 #endif
@@ -363,7 +360,7 @@ namespace hint
                 for (INT_32 i = cur_log_size + 1; i <= shift; i++)
                 {
                     size_t len = 1ull << i, vec_size = len * FAC / 4;
-                    table[i] = std::vector<Complex>(vec_size);
+                    table[i].resize(vec_size);
                     for (size_t pos = 0; pos < len / 4; pos++)
                     {
                         Complex tmp = std::conj(unit_root(len, pos));
@@ -382,7 +379,7 @@ namespace hint
             // 返回单位圆上平分m份的第n个
             static Complex unit_root(size_t m, size_t n)
             {
-                return unit_root((2.0 * PI * n) / m);
+                return unit_root((2.0 * HINT_PI * n) / m);
             }
             // shift表示圆平分为1<<shift份,n表示第几个单位根
             Complex get_complex(UINT_32 shift, size_t n) const
@@ -402,7 +399,6 @@ namespace hint
             INT_32 max_log_size = 1;
             INT_32 cur_log_size = 1;
 
-            static constexpr double PI = HINT_PI;
             static constexpr size_t FAC = 3;
             ComplexTableZ(const ComplexTableZ &) = delete;
             ComplexTableZ &operator=(const ComplexTableZ &) = delete;
@@ -449,7 +445,7 @@ namespace hint
             // 返回单位圆上平分m份的第n个
             static Complex unit_root(size_t m, size_t n)
             {
-                return unit_root((2.0 * PI * n) / m);
+                return unit_root((2.0 * HINT_PI * n) / m);
             }
             // shift表示圆平分为1<<shift份,n表示第几个单位根
             Complex get_complex(UINT_32 shift, size_t n) const
@@ -1362,6 +1358,96 @@ namespace hint
             fft_dit(input, fft_len, bit_inv);
             fft_conj(input, fft_len, fft_len);
         }
+#if MULTITHREAD == 1
+        void fft_dit_2ths(Complex *input, size_t fft_len)
+        {
+            const size_t half_len = fft_len / 2;
+            const INT_32 log_len = hint_log2(fft_len);
+            auto th = std::async(fft_dit, input, half_len, false);
+            fft_dit(input + half_len, half_len, false);
+            th.wait();
+            auto proc = [&](size_t start, size_t end)
+            {
+                for (size_t i = start; i < end; i++)
+                {
+                    Complex omega = TABLE.get_complex_conj(log_len, i);
+                    fft_radix2_dit_butterfly(omega, input + i, half_len);
+                }
+            };
+            th = std::async(proc, 0, half_len / 2);
+            proc(half_len / 2, half_len);
+            th.wait();
+        }
+        void fft_dif_2ths(Complex *input, size_t fft_len)
+        {
+            const size_t half_len = fft_len / 2;
+            const INT_32 log_len = hint_log2(fft_len);
+            auto proc = [&](size_t start, size_t end)
+            {
+                for (size_t i = start; i < end; i++)
+                {
+                    Complex omega = TABLE.get_complex_conj(log_len, i);
+                    fft_radix2_dif_butterfly(omega, input + i, half_len);
+                }
+            };
+            auto th = std::async(proc, 0, half_len / 2);
+            proc(half_len / 2, half_len);
+            th.wait();
+            th = std::async(fft_dif, input, half_len, false);
+            fft_dif(input + half_len, half_len, false);
+            th.wait();
+        }
+        void fft_dit_4ths(Complex *input, size_t fft_len)
+        {
+            const size_t half_len = fft_len / 2;
+            const INT_32 log_len = hint_log2(fft_len);
+            auto th1 = std::async(fft_dit_2ths, input, half_len);
+            fft_dit_2ths(input + half_len, half_len);
+            th1.wait();
+
+            auto proc = [&](size_t start, size_t end)
+            {
+                for (size_t i = start; i < end; i++)
+                {
+                    Complex omega = TABLE.get_complex_conj(log_len, i);
+                    fft_radix2_dit_butterfly(omega, input + i, half_len);
+                }
+            };
+            const size_t sub_len = fft_len / 8;
+            th1 = std::async(proc, 0, sub_len);
+            auto th2 = std::async(proc, sub_len, sub_len * 2);
+            auto th3 = std::async(proc, sub_len * 2, sub_len * 3);
+            proc(sub_len * 3, sub_len * 4);
+            th1.wait();
+            th2.wait();
+            th3.wait();
+        }
+        void fft_dif_4ths(Complex *input, size_t fft_len)
+        {
+            const size_t half_len = fft_len / 2;
+            const INT_32 log_len = hint_log2(fft_len);
+            auto proc = [&](size_t start, size_t end)
+            {
+                for (size_t i = start; i < end; i++)
+                {
+                    Complex omega = TABLE.get_complex_conj(log_len, i);
+                    fft_radix2_dif_butterfly(omega, input + i, half_len);
+                }
+            };
+            const size_t sub_len = fft_len / 8;
+            auto th1 = std::async(proc, 0, sub_len);
+            auto th2 = std::async(proc, sub_len, sub_len * 2);
+            auto th3 = std::async(proc, sub_len * 2, sub_len * 3);
+            proc(sub_len * 3, sub_len * 4);
+            th1.wait();
+            th2.wait();
+            th3.wait();
+
+            th1 = std::async(fft_dif_2ths, input, half_len);
+            fft_dif_2ths(input + half_len, half_len);
+            th1.wait();
+        }
+#endif
     }
 }
 
@@ -1378,7 +1464,11 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
     Complex *fft_ary = new Complex[fft_len];
     com_ary_combine_copy(fft_ary, in1, len1, in2, len2);
     // fft_radix2_dif_lut(fft_ary, fft_len, false); // 经典FFT
+#if MULTITHREAD == 1
+    fft_dif_4ths(fft_ary, fft_len);
+#else
     fft_dif(fft_ary, fft_len, false); // 优化FFT
+#endif
     for (size_t i = 0; i < fft_len; i++)
     {
         Complex tmp = fft_ary[i];
@@ -1386,7 +1476,11 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
         fft_ary[i] = std::conj(tmp);
     }
     // fft_radix2_dit_lut(fft_ary, fft_len, false); // 经典FFT
+#if MULTITHREAD == 1
+    fft_dit_4ths(fft_ary, fft_len);
+#else
     fft_dit(fft_ary, fft_len, false); // 优化FFT
+#endif
     double inv = -0.5 / fft_len;
     for (size_t i = 0; i < out_len; i++)
     {
@@ -1400,8 +1494,8 @@ int main()
 {
     StopWatch w(1000);
     int n = 18;
-    // cin >> n;
-    size_t len = 1 << n;
+    cin >> n;
+    size_t len = 1 << n; // 变换长度
     uint64_t ele = 9;
     vector<uint32_t> in1(len / 2, ele);
     vector<uint32_t> in2(len / 2, ele);
