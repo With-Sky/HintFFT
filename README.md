@@ -1,2 +1,2 @@
 # HintFFT
-C++ Fast Fourier Transform used in HyperInt.
+C++ Fast Fourier Transform used in HyperInt-Mini.
