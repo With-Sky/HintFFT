@@ -7,7 +7,7 @@
 #include "stopwatch.hpp"
 
 #define MULTITHREAD 0   // 多线程 0 means no, 1 means yes
-#define TABLE_TYPE 1    // 复数表的类型 0 means ComplexTable, 1 means ComplexTableX,2 means ComplexTableZ
+#define TABLE_TYPE 1    // 复数表的类型 0 means ComplexTable, 1 means ComplexTableX
 #define TABLE_PRELOAD 1 // 是否提前初始化表 0 means no, 1 means yes
 
 namespace hint
@@ -188,32 +188,10 @@ namespace hint
                 table.resize(ary_size);
                 table[0] = Complex(1);
 #if TABLE_PRELOAD == 1
-                expend(max_shift);
+                expand(max_shift);
 #endif
             }
-            void expend(INT_32 shift)
-            {
-                // expand1(shift);
-                expand2(shift);
-            }
-            void expand1(INT_32 shift)
-            {
-                shift = std::max<INT_32>(shift, 3);
-                if (shift > max_log_size)
-                {
-                    throw("FFT length too long for lut\n");
-                }
-                for (INT_32 i = cur_log_size + 1; i <= shift; i++)
-                {
-                    size_t len = 1ull << i, vec_size = len / 4;
-                    for (size_t pos = 0; pos < vec_size; pos++)
-                    {
-                        table[vec_size + pos] = unit_root(len, pos);
-                    }
-                }
-                cur_log_size = std::max(cur_log_size, shift);
-            }
-            void expand2(INT_32 shift)
+            void expand(INT_32 shift)
             {
                 shift = std::max<INT_32>(shift, 3);
                 if (shift > max_log_size)
@@ -243,7 +221,7 @@ namespace hint
             // 返回单位圆上平分m份的第n个
             static Complex unit_root(size_t m, size_t n)
             {
-                return unit_root((2.0 * HINT_PI * n) / m);
+                return unit_root((HINT_2PI * n) / m);
             }
             // shift表示圆平分为1<<shift份,n表示第几个单位根
             Complex get_complex(UINT_32 shift, size_t n) const
@@ -347,10 +325,10 @@ namespace hint
                 table.resize(max_shift + 1);
                 table[0] = table[1] = std::vector<Complex>{1};
 #if TABLE_PRELOAD == 1
-                expend(max_shift);
+                expand(max_shift);
 #endif
             }
-            void expend(INT_32 shift)
+            void expand(INT_32 shift)
             {
                 shift = std::max<INT_32>(shift, 2);
                 if (shift > max_log_size)
@@ -379,7 +357,7 @@ namespace hint
             // 返回单位圆上平分m份的第n个
             static Complex unit_root(size_t m, size_t n)
             {
-                return unit_root((2.0 * HINT_PI * n) / m);
+                return unit_root((HINT_2PI * n) / m);
             }
             // shift表示圆平分为1<<shift份,n表示第几个单位根
             Complex get_complex(UINT_32 shift, size_t n) const
@@ -392,80 +370,14 @@ namespace hint
                 return table[shift][n];
             }
         };
-        class ComplexTableZ
-        {
-        private:
-            std::vector<Complex> table;
-            INT_32 max_log_size = 1;
-            INT_32 cur_log_size = 1;
-
-            static constexpr size_t FAC = 3;
-            ComplexTableZ(const ComplexTableZ &) = delete;
-            ComplexTableZ &operator=(const ComplexTableZ &) = delete;
-
-        public:
-            ~ComplexTableZ() {}
-            // 初始化可以生成平分圆1<<shift份产生的单位根的表
-            ComplexTableZ(UINT_32 max_shift)
-            {
-                max_shift = std::max<size_t>(max_shift, 1);
-                max_log_size = max_shift;
-                size_t vec_size = (1 << (max_shift - 1)) * FAC;
-                table.resize(vec_size);
-                table[0] = table[1] = Complex(1, 0), table[2] = Complex(0, 1);
-#if TABLE_PRELOAD == 1
-                expend(max_shift);
-#endif
-            }
-            void expend(INT_32 shift)
-            {
-                shift = std::max<INT_32>(shift, 2);
-                if (shift > max_log_size)
-                {
-                    throw("FFT length too long for lut\n");
-                }
-                for (INT_32 i = cur_log_size + 1; i <= shift; i++)
-                {
-                    size_t len = 1ull << i, vec_size = len * FAC / 4;
-                    for (size_t pos = 0; pos < len / 4; pos++)
-                    {
-                        Complex tmp = std::conj(unit_root(len, pos));
-                        table[vec_size + pos] = tmp;
-                        table[vec_size + pos + len / 4] = Complex(tmp.imag(), -tmp.real());
-                        table[vec_size + pos + len / 2] = -tmp;
-                    }
-                }
-                cur_log_size = std::max(cur_log_size, shift);
-            }
-            // 返回单位圆上辐角为theta的点
-            static Complex unit_root(double theta)
-            {
-                return std::polar<double>(1.0, theta);
-            }
-            // 返回单位圆上平分m份的第n个
-            static Complex unit_root(size_t m, size_t n)
-            {
-                return unit_root((2.0 * HINT_PI * n) / m);
-            }
-            // shift表示圆平分为1<<shift份,n表示第几个单位根
-            Complex get_complex(UINT_32 shift, size_t n) const
-            {
-                return std::conj(table[(1 << (shift - 2)) * FAC + n]);
-            }
-            // shift表示圆平分为1<<shift份,n表示第几个单位根的共轭
-            Complex get_complex_conj(UINT_32 shift, size_t n) const
-            {
-                return table[(1 << (shift - 2)) * FAC + n];
-            }
-        };
 
         constexpr size_t lut_max_rank = 23;
 #if TABLE_TYPE == 0
         static ComplexTable TABLE(lut_max_rank);
 #elif TABLE_TYPE == 1
         static ComplexTableX TABLE(lut_max_rank);
-#elif TABLE_TYPE == 2
-        static ComplexTableZ TABLE(lut_max_rank);
+#else
+#error TABLE_TYPE must be 0,1
 #endif
         // 二进制逆序
         template <typename T>
@@ -974,12 +886,12 @@ namespace hint
 
             fft_2point(tmp0, tmp2);
             fft_2point(tmp1, tmp3);
-            tmp3 = Complex(-tmp3.imag(), tmp3.real());
+            tmp3 = Complex(tmp3.imag(), -tmp3.real());
 
             input[0] = tmp0;
             input[rank] = tmp1;
-            input[rank * 2] = (tmp2 - tmp3) * omega;
-            input[rank * 3] = (tmp2 + tmp3) * omega_cube;
+            input[rank * 2] = (tmp2 + tmp3) * omega;
+            input[rank * 3] = (tmp2 - tmp3) * omega_cube;
         }
         // fft基4时间抽取蝶形变换
         inline void fft_radix4_dit_butterfly(Complex omega, Complex omega_sqr, Complex omega_cube,
@@ -1104,7 +1016,7 @@ namespace hint
             {
                 binary_inverse_swap(input, fft_len);
             }
-            TABLE.expend(hint_log2(fft_len));
+            TABLE.expand(hint_log2(fft_len));
             for (size_t i = 0; i < fft_len; i += 2)
             {
                 fft_2point(input[i], input[i + 1]);
@@ -1146,7 +1058,7 @@ namespace hint
                 return;
             }
             INT_32 log_len = hint_log2(fft_len);
-            TABLE.expend(log_len);
+            TABLE.expand(log_len);
             fft_len /= 2;
             for (size_t pos = 0; pos < fft_len; pos++)
             {
@@ -1280,7 +1192,7 @@ namespace hint
                 fft_dit_template<LEN * 2>(input, fft_len);
                 return;
             }
-            TABLE.expend(hint_log2(LEN));
+            TABLE.expand(hint_log2(LEN));
             fft_split_radix_dit_template<LEN>(input);
         }
         template <>
@@ -1294,7 +1206,7 @@ namespace hint
                 fft_dif_template<LEN * 2>(input, fft_len);
                 return;
             }
-            TABLE.expend(hint_log2(LEN));
+            TABLE.expand(hint_log2(LEN));
             fft_split_radix_dif_template<LEN>(input);
         }
         template <>
