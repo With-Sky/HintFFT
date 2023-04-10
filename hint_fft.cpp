@@ -202,7 +202,11 @@ namespace hint
                 {
                     size_t len = 1ull << i, vec_size = len / 4;
                     table[vec_size] = Complex(1, 0);
-                    for (size_t pos = 1; pos < vec_size / 2; pos++)
+                    for (size_t pos = 0; pos < vec_size / 2; pos++)
+                    {
+                        table[vec_size + pos * 2] = table[vec_size / 2 + pos];
+                    }
+                    for (size_t pos = 1; pos < vec_size / 2; pos += 2)
                     {
                         double cos_theta = std::cos(HINT_2PI * pos / len);
                         double sin_theta = std::sin(HINT_2PI * pos / len);
@@ -339,7 +343,11 @@ namespace hint
                 {
                     size_t len = 1ull << i, vec_size = len * FAC / 4;
                     table[i].resize(vec_size);
-                    for (size_t pos = 0; pos < len / 4; pos++)
+                    for (size_t pos = 0; pos < vec_size / 2; pos++)
+                    {
+                        table[i][pos * 2] = table[i - 1][pos];
+                    }
+                    for (size_t pos = 1; pos < len / 4; pos += 2)
                     {
                         Complex tmp = std::conj(unit_root(len, pos));
                         table[i][pos] = tmp;
@@ -421,10 +429,11 @@ namespace hint
             delete[] rev;
         }
         // 2点fft
-        inline void fft_2point(Complex &sum, Complex &diff)
+        template <typename T>
+        inline void fft_2point(T &sum, T &diff)
         {
-            Complex tmp0 = sum;
-            Complex tmp1 = diff;
+            T tmp0 = sum;
+            T tmp1 = diff;
             sum = tmp0 + tmp1;
             diff = tmp0 - tmp1;
         }
@@ -1375,7 +1384,6 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
     size_t fft_len = min_2pow(out_len);
     Complex *fft_ary = new Complex[fft_len];
     com_ary_combine_copy(fft_ary, in1, len1, in2, len2);
-    // fft_radix2_dif_lut(fft_ary, fft_len, false); // 经典FFT
 #if MULTITHREAD == 1
     fft_dif_4ths(fft_ary, fft_len);
 #else
@@ -1387,7 +1395,6 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
         tmp *= tmp;
         fft_ary[i] = std::conj(tmp);
     }
-    // fft_radix2_dit_lut(fft_ary, fft_len, false); // 经典FFT
 #if MULTITHREAD == 1
     fft_dit_4ths(fft_ary, fft_len);
 #else
