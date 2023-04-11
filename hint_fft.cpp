@@ -388,7 +388,7 @@ namespace hint
 #endif
         // 二进制逆序
         template <typename T>
-        void binary_inverse_swap(T &ary, size_t len)
+        void binary_reverse_swap(T &ary, size_t len)
         {
             size_t i = 0;
             for (size_t j = 1; j < len - 1; j++)
@@ -408,7 +408,7 @@ namespace hint
         }
         // 四进制逆序
         template <typename SizeType = UINT_32, typename T>
-        void quaternary_inverse_swap(T &ary, size_t len)
+        void quaternary_reverse_swap(T &ary, size_t len)
         {
             SizeType log_n = hint_log2(len);
             SizeType *rev = new SizeType[len / 4];
@@ -958,7 +958,7 @@ namespace hint
         void fft_radix2_dit(Complex *input, size_t fft_len)
         {
             fft_len = max_2pow(fft_len);
-            binary_inverse_swap(input, fft_len);
+            binary_reverse_swap(input, fft_len);
             for (size_t rank = 1; rank < fft_len; rank *= 2)
             {
                 // rank表示上一级fft的长度,gap表示由两个上一级可以迭代计算出这一级的长度
@@ -980,7 +980,7 @@ namespace hint
         {
             size_t log4_len = hint_log2(fft_len) / 2;
             fft_len = 1ull << (log4_len * 2);
-            quaternary_inverse_swap(input, fft_len);
+            quaternary_reverse_swap(input, fft_len);
             for (size_t pos = 0; pos < fft_len; pos += 4)
             {
                 fft_4point(input + pos, 1);
@@ -1009,7 +1009,7 @@ namespace hint
             }
         }
         // 基2查时间抽取FFT
-        void fft_radix2_dit_lut(Complex *input, size_t fft_len, bool bit_inv = true)
+        void fft_radix2_dit_lut(Complex *input, size_t fft_len, bool bit_rev = true)
         {
             if (fft_len <= 1)
             {
@@ -1020,9 +1020,9 @@ namespace hint
                 fft_2point(input[0], input[1]);
                 return;
             }
-            if (bit_inv)
+            if (bit_rev)
             {
-                binary_inverse_swap(input, fft_len);
+                binary_reverse_swap(input, fft_len);
             }
             TABLE.expand(hint_log2(fft_len));
             for (size_t i = 0; i < fft_len; i += 2)
@@ -1054,7 +1054,7 @@ namespace hint
             }
         }
         // 基2查频率抽取FFT
-        void fft_radix2_dif_lut(Complex *input, size_t fft_len, const bool bit_inv = true)
+        void fft_radix2_dif_lut(Complex *input, size_t fft_len, const bool bit_rev = true)
         {
             if (fft_len <= 1)
             {
@@ -1095,9 +1095,9 @@ namespace hint
             {
                 fft_2point(input[i], input[i + 1]);
             }
-            if (bit_inv)
+            if (bit_rev)
             {
-                binary_inverse_swap(input, fft_len);
+                binary_reverse_swap(input, fft_len);
             }
         }
         // 模板化时间抽取分裂基fft
@@ -1223,13 +1223,13 @@ namespace hint
         /// @brief 时间抽取基2fft
         /// @param input 复数组
         /// @param fft_len 数组长度
-        /// @param bit_inv 是否逆序
-        inline void fft_dit(Complex *input, size_t fft_len, bool bit_inv = true)
+        /// @param bit_rev 是否逆序
+        inline void fft_dit(Complex *input, size_t fft_len, bool bit_rev = true)
         {
             fft_len = max_2pow(fft_len);
-            if (bit_inv)
+            if (bit_rev)
             {
-                binary_inverse_swap(input, fft_len);
+                binary_reverse_swap(input, fft_len);
             }
             fft_dit_template<1>(input, fft_len);
         }
@@ -1237,21 +1237,21 @@ namespace hint
         /// @brief 频率抽取基2fft
         /// @param input 复数组
         /// @param fft_len 数组长度
-        /// @param bit_inv 是否逆序
-        inline void fft_dif(Complex *input, size_t fft_len, bool bit_inv = true)
+        /// @param bit_rev 是否逆序
+        inline void fft_dif(Complex *input, size_t fft_len, bool bit_rev = true)
         {
             fft_len = max_2pow(fft_len);
             fft_dif_template<1>(input, fft_len);
-            if (bit_inv)
+            if (bit_rev)
             {
-                binary_inverse_swap(input, fft_len);
+                binary_reverse_swap(input, fft_len);
             }
         }
         /// @brief 快速傅里叶变换
         /// @param input 复数组
         /// @param fft_len 变换长度
-        /// @param r4_bit_inv 基4是否进行比特逆序,与逆变换同时设为false可以提高性能
-        inline void fft(Complex *input, size_t fft_len, const bool bit_inv = true)
+        /// @param r4_bit_rev 基4是否进行比特逆序,与逆变换同时设为false可以提高性能
+        inline void fft(Complex *input, size_t fft_len, const bool bit_rev = true)
         {
             size_t log_len = hint_log2(fft_len);
             fft_len = 1ull << log_len;
@@ -1259,13 +1259,13 @@ namespace hint
             {
                 return;
             }
-            fft_dif(input, fft_len, bit_inv);
+            fft_dif(input, fft_len, bit_rev);
         }
         /// @brief 快速傅里叶逆变换
         /// @param input 复数组
         /// @param fft_len 变换长度
-        /// @param r4_bit_inv 基4是否进行比特逆序,与逆变换同时设为false可以提高性能
-        inline void ifft(Complex *input, size_t fft_len, const bool bit_inv = true)
+        /// @param r4_bit_rev 基4是否进行比特逆序,与逆变换同时设为false可以提高性能
+        inline void ifft(Complex *input, size_t fft_len, const bool bit_rev = true)
         {
             size_t log_len = hint_log2(fft_len);
             fft_len = 1ull << log_len;
@@ -1275,7 +1275,7 @@ namespace hint
             }
             fft_len = max_2pow(fft_len);
             fft_conj(input, fft_len);
-            fft_dit(input, fft_len, bit_inv);
+            fft_dit(input, fft_len, bit_rev);
             fft_conj(input, fft_len, fft_len);
         }
 #if MULTITHREAD == 1
@@ -1403,10 +1403,10 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 #else
     fft_dit(fft_ary, fft_len, false); // 优化FFT
 #endif
-    double inv = -0.5 / fft_len;
+    double rev = -0.5 / fft_len;
     for (size_t i = 0; i < out_len; i++)
     {
-        result[i] = static_cast<T>(fft_ary[i].imag() * inv + 0.5);
+        result[i] = static_cast<T>(fft_ary[i].imag() * rev + 0.5);
     }
     delete[] fft_ary;
     return result;

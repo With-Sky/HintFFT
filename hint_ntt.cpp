@@ -100,7 +100,7 @@ namespace hint
     {
         // 二进制逆序
         template <typename T>
-        void binary_inverse_swap(T &ary, size_t len)
+        void binary_reverse_swap(T &ary, size_t len)
         {
             size_t i = 0;
             for (size_t j = 1; j < len - 1; j++)
@@ -120,7 +120,7 @@ namespace hint
         }
         // 四进制逆序
         template <typename SizeType = UINT_32, typename T>
-        void quaternary_inverse_swap(T &ary, size_t len)
+        void quaternary_reverse_swap(T &ary, size_t len)
         {
             SizeType log_n = hint_log2(len);
             SizeType *rev = new SizeType[len / 4];
@@ -509,7 +509,7 @@ namespace hint
             }
             // 基2时间抽取ntt
             template <typename T>
-            static void ntt_radix2_dit(ModIntTy<T> *input, size_t ntt_len, bool bit_inv = true)
+            static void ntt_radix2_dit(ModIntTy<T> *input, size_t ntt_len, bool bit_rev = true)
             {
                 ntt_len = max_2pow(ntt_len);
                 if (ntt_len <= 1)
@@ -521,9 +521,9 @@ namespace hint
                     ntt_2point(input[0], input[1]);
                     return;
                 }
-                if (bit_inv)
+                if (bit_rev)
                 {
-                    binary_inverse_swap(input, ntt_len);
+                    binary_reverse_swap(input, ntt_len);
                 }
                 for (size_t pos = 0; pos < ntt_len; pos += 2)
                 {
@@ -556,7 +556,7 @@ namespace hint
             }
             // 基2频率抽取ntt
             template <typename T>
-            static void ntt_radix2_dif(ModIntTy<T> *input, size_t ntt_len, bool bit_inv = true)
+            static void ntt_radix2_dif(ModIntTy<T> *input, size_t ntt_len, bool bit_rev = true)
             {
                 ntt_len = max_2pow(ntt_len);
                 if (ntt_len <= 1)
@@ -597,13 +597,12 @@ namespace hint
                 {
                     ntt_2point(input[pos], input[pos + 1]);
                 }
-                if (bit_inv)
+                if (bit_rev)
                 {
-                    binary_inverse_swap(input, ntt_len);
+                    binary_reverse_swap(input, ntt_len);
                 }
             }
         };
-        // template <UINT_64 MOD, UINT_64 G_ROOT>
         template <size_t LEN, UINT_64 MOD, UINT_64 G_ROOT>
         struct SPLIT_RADIX_NTT
         {
@@ -739,23 +738,23 @@ namespace hint
             static constexpr void ntt_dif_template(ModInt32 *input, size_t ntt_len) {}
         };
         template <UINT_64 MOD, UINT_64 G_ROOT>
-        inline void ntt_dit(UINT_32 *input, size_t ntt_len, bool bit_inv = true)
+        inline void ntt_dit(UINT_32 *input, size_t ntt_len, bool bit_rev = true)
         {
             ntt_len = max_2pow(ntt_len);
-            if (bit_inv)
+            if (bit_rev)
             {
-                binary_inverse_swap(input, ntt_len);
+                binary_reverse_swap(input, ntt_len);
             }
             NTT_ALERT<1, MOD, G_ROOT>::ntt_dit_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
         }
         template <UINT_64 MOD, UINT_64 G_ROOT>
-        inline void ntt_dif(UINT_32 *input, size_t ntt_len, bool bit_inv = true)
+        inline void ntt_dif(UINT_32 *input, size_t ntt_len, bool bit_rev = true)
         {
             ntt_len = max_2pow(ntt_len);
             NTT_ALERT<1, MOD, G_ROOT>::ntt_dif_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
-            if (bit_inv)
+            if (bit_rev)
             {
-                binary_inverse_swap(input, ntt_len);
+                binary_reverse_swap(input, ntt_len);
             }
         }
     }
