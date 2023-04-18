@@ -708,14 +708,14 @@ namespace hint
             }
         };
         template <size_t LEN, UINT_64 MOD, UINT_64 G_ROOT>
-        struct NTT_ALERT
+        struct NTT_ALT
         {
             using ModInt32 = ModInt<MOD, UINT_32>;
             static constexpr void ntt_dit_template(ModInt32 *input, size_t ntt_len)
             {
                 if (ntt_len > LEN)
                 {
-                    NTT_ALERT<LEN * 2, MOD, G_ROOT>::ntt_dit_template(input, ntt_len);
+                    NTT_ALT<LEN * 2, MOD, G_ROOT>::ntt_dit_template(input, ntt_len);
                     return;
                 }
                 SPLIT_RADIX_NTT<LEN, MOD, G_ROOT>::ntt_split_radix_dit_template(input);
@@ -724,14 +724,14 @@ namespace hint
             {
                 if (ntt_len > LEN)
                 {
-                    NTT_ALERT<LEN * 2, MOD, G_ROOT>::ntt_dif_template(input, ntt_len);
+                    NTT_ALT<LEN * 2, MOD, G_ROOT>::ntt_dif_template(input, ntt_len);
                     return;
                 }
                 SPLIT_RADIX_NTT<LEN, MOD, G_ROOT>::ntt_split_radix_dif_template(input);
             }
         };
         template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct NTT_ALERT<1 << 30, MOD, G_ROOT>
+        struct NTT_ALT<1 << 30, MOD, G_ROOT>
         {
             using ModInt32 = ModInt<MOD, UINT_32>;
             static constexpr void ntt_dit_template(ModInt32 *input, size_t ntt_len) {}
@@ -745,13 +745,13 @@ namespace hint
             {
                 binary_reverse_swap(input, ntt_len);
             }
-            NTT_ALERT<1, MOD, G_ROOT>::ntt_dit_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
+            NTT_ALT<1, MOD, G_ROOT>::ntt_dit_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
         }
         template <UINT_64 MOD, UINT_64 G_ROOT>
         inline void ntt_dif(UINT_32 *input, size_t ntt_len, bool bit_rev = true)
         {
             ntt_len = max_2pow(ntt_len);
-            NTT_ALERT<1, MOD, G_ROOT>::ntt_dif_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
+            NTT_ALT<1, MOD, G_ROOT>::ntt_dif_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
             if (bit_rev)
             {
                 binary_reverse_swap(input, ntt_len);
@@ -803,19 +803,10 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
     }
     return result;
 }
-int main()
+template <typename T>
+void result_test(const vector<T> &res, T ele)
 {
-    StopWatch w(1000);
-    int n = 18;
-    cin >> n;
-    size_t len = 1 << n;
-    uint64_t ele = 5;
-    vector<uint32_t> in1(len / 2, ele);
-    vector<uint32_t> in2(len / 2, ele);
-    w.start();
-    vector<uint32_t> res = poly_multiply(in1, in2);
-    w.stop();
-    // 验证卷积结果
+    size_t len = res.size();
     for (size_t i = 0; i < len / 2; i++)
     {
         uint64_t x = (i + 1) * ele * ele;
@@ -823,7 +814,7 @@ int main()
         if (x != y)
         {
             cout << "fail:" << i << "\t" << (i + 1) * ele * ele << "\t" << y << "\n";
-            break;
+            return;
         }
     }
     for (size_t i = len / 2; i < len; i++)
@@ -833,10 +824,25 @@ int main()
         if (x != y)
         {
             cout << "fail:" << i << "\t" << x << "\t" << y << "\n";
-            break;
+            return;
         }
     }
+    cout << "success\n";
+}
+
+int main()
+{
+    StopWatch w(1000);
+    int n = 18;
+    cin >> n;
+    size_t len = 1 << n; // 变换长度
+	cout << "fft len:" << len << "\n";
+    uint64_t ele = 9;
+    vector<uint32_t> in1(len / 2, ele);
+    vector<uint32_t> in2(len / 2, ele); // 计算两个长度为len/2，每个元素为ele的卷积
+    w.start();
+    vector<uint32_t> res = poly_multiply(in1, in2);
+    w.stop();
+    result_test<uint32_t>(res, ele); // 结果校验
     cout << w.duration() << "ms\n";
-    // cin.get();
-    return 0;
 }
