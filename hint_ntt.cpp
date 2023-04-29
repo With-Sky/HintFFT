@@ -19,6 +19,19 @@ namespace hint
 
     constexpr double PI = 3.1415926535897932384626433832795;
     constexpr double PI_2 = PI * 2;
+
+    constexpr UINT_64 NTT_MOD1 = 3221225473;
+    constexpr UINT_64 NTT_ROOT1 = 5;
+    constexpr UINT_64 NTT_MOD2 = 3489660929;
+    constexpr UINT_64 NTT_ROOT2 = 3;
+    constexpr size_t NTT_MAX_LEN1 = 1ull << 28;
+
+    constexpr UINT_64 NTT_MOD3 = 79164837199873;
+    constexpr UINT_64 NTT_ROOT3 = 5;
+    constexpr UINT_64 NTT_MOD4 = 96757023244289;
+    constexpr UINT_64 NTT_ROOT4 = 3;
+    constexpr size_t NTT_MAX_LEN2 = 1ull << 43;
+
     template <typename T>
     constexpr bool is_odd(T x)
     {
@@ -46,7 +59,7 @@ namespace hint
         return res;
     }
     template <typename T>
-    constexpr size_t hint_log2(T n)
+    constexpr T hint_log2(T n)
     {
         T res = 0;
         while (n > 1)
@@ -96,6 +109,14 @@ namespace hint
     {
         return qpow(n, mod - 2, mod);
     }
+    template <typename T>
+    inline void ary_mul(const T in1[], const T in2[], T out[], size_t len)
+    {
+        for (size_t i = 0; i < len; i++)
+        {
+            out[i] = in1[i] * in2[i];
+        }
+    }
     namespace hint_transform
     {
         // 二进制逆序
@@ -139,623 +160,701 @@ namespace hint
             }
             delete[] rev;
         }
-        template <typename T>
-        inline void ary_mul(const T in1[], const T in2[], T out[], size_t len)
+        namespace hint_ntt
         {
-            for (size_t i = 0; i < len; i++)
+            template <typename DataTy, UINT_64 MOD>
+            struct ModInt
             {
-                out[i] = in1[i] * in2[i];
-            }
-        }
-
-        template <UINT_64 MOD, typename DataTy = UINT_32>
-        struct ModInt
-        {
-            // 实际存放的整数
-            DataTy data = 0;
-            // 等价复数的i
-            constexpr ModInt() noexcept {}
-            constexpr ModInt(DataTy num) noexcept
-            {
-                data = num;
-            }
-            constexpr ModInt operator+(ModInt n) const
-            {
-                UINT_64 sum = static_cast<UINT_64>(data) + n.data;
-                return sum < MOD ? sum : sum - MOD;
-            }
-            constexpr ModInt operator-(ModInt n) const
-            {
-                return data < n.data ? MOD + data - n.data : data - n.data;
-            }
-            constexpr ModInt operator*(ModInt n) const
-            {
-                return static_cast<UINT_64>(data) * n.data % MOD;
-            }
-            constexpr ModInt operator/(ModInt n) const
-            {
-                return *this * inv();
-            }
-            constexpr ModInt inv() const
-            {
-                return power(MOD - 2);
-            }
-            constexpr ModInt power(DataTy n) const
-            {
-                UINT_64 m = data;
-                if (m <= 1)
+                // 实际存放的整数
+                DataTy data = 0;
+                // 等价复数的i
+                constexpr ModInt() noexcept {}
+                constexpr ModInt(DataTy num) noexcept
                 {
-                    return m;
+                    data = num;
                 }
-                UINT_64 result = 1;
-                while (n > 0)
+                constexpr ModInt operator+(ModInt n) const
                 {
-                    if ((n & 1) != 0)
+                    UINT_64 sum = UINT_64(data) + n.data;
+                    return sum < MOD ? sum : sum - MOD;
+                }
+                constexpr ModInt operator-(ModInt n) const
+                {
+                    return data < n.data ? MOD + data - n.data : data - n.data;
+                }
+                constexpr ModInt operator*(ModInt n) const
+                {
+                    return static_cast<UINT_64>(data) * n.data % MOD;
+                }
+                constexpr ModInt operator/(ModInt n) const
+                {
+                    return *this * inv();
+                }
+                constexpr ModInt inv() const
+                {
+                    return qpow(*this, MOD - 2u);
+                }
+                constexpr static ModInt mod()
+                {
+                    return MOD;
+                }
+            };
+            template <UINT_64 MOD>
+            struct ModInt<UINT_64, MOD>
+            {
+                // 实际存放的整数
+                UINT_64 data = 0;
+                // 等价复数的i
+                constexpr ModInt() noexcept {}
+                constexpr ModInt(UINT_64 num) noexcept
+                {
+                    data = num;
+                }
+                constexpr ModInt operator+(ModInt n) const
+                {
+                    return (n.data += data) < MOD ? n.data : n.data - MOD;
+                }
+                constexpr ModInt operator-(ModInt n) const
+                {
+                    return data < n.data ? MOD + data - n.data : data - n.data;
+                }
+                constexpr ModInt operator*(ModInt n) const
+                {
+                    UINT_64 b1 = n.data & 0xffff;
+                    UINT_64 b2 = (n.data >> 16) & 0xffff;
+                    UINT_64 b3 = n.data >> 32;
+                    b1 = data * b1;
+                    b2 = data * b2;
+                    b3 = (((data * b3) % MOD) << 16) + b2;
+                    b3 = ((b3 % MOD) << 16) + b1;
+                    return b3 % MOD;
+                    // UINT_64 b2 = n.data >> 20;
+                    // n.data &= 0xfffff;
+                    // n.data *= data;
+                    // b2 = data * b2 % MOD;
+                    // return (n.data + (b2 << 20)) % MOD;
+                }
+                constexpr ModInt operator/(ModInt n) const
+                {
+                    return *this * inv();
+                }
+                constexpr ModInt inv() const
+                {
+                    return qpow(*this, MOD - 2ull);
+                }
+                constexpr static ModInt mod()
+                {
+                    return MOD;
+                }
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct NTT_BASIC
+            {
+                static constexpr UINT_64 mod()
+                {
+                    return MOD;
+                }
+                static constexpr UINT_64 root()
+                {
+                    return ROOT;
+                }
+
+                using NTTModInt32 = ModInt<UINT_32, MOD>;
+                using NTTModInt64 = ModInt<UINT_64, MOD>;
+
+                template <typename T>
+                static constexpr void ntt_normalize(T *input, size_t ntt_len)
+                {
+                    const T inv = T(ntt_len).inv();
+                    size_t mod4 = ntt_len % 4;
+                    ntt_len -= mod4;
+                    for (size_t i = 0; i < ntt_len; i += 4)
                     {
-                        result = result * m % MOD;
+                        input[i] = inv * input[i];
+                        input[i + 1] = inv * input[i + 1];
+                        input[i + 2] = inv * input[i + 2];
+                        input[i + 3] = inv * input[i + 3];
                     }
-                    m = m * m % MOD;
-                    n >>= 1;
-                }
-                return result;
-            }
-            constexpr ModInt normalize() const
-            {
-                return data % MOD;
-            }
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct NTT
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            template <typename T>
-            using ModIntTy = ModInt<MOD, T>;
-            template <typename T>
-            static constexpr void ntt_normalize(ModIntTy<T> *input, size_t ntt_len)
-            {
-                const ModIntTy<T> inv = ModIntTy<T>(ntt_len).inv();
-                size_t mod4 = ntt_len % 4;
-                ntt_len -= mod4;
-                for (size_t i = 0; i < ntt_len; i += 4)
-                {
-                    input[i] = inv * input[i];
-                    input[i + 1] = inv * input[i + 1];
-                    input[i + 2] = inv * input[i + 2];
-                    input[i + 3] = inv * input[i + 3];
-                }
-                for (size_t i = ntt_len; i < ntt_len + mod4; i++)
-                {
-                    input[i] = inv * input[i];
-                }
-            }
-            // 2点NTT
-            template <typename T>
-            static constexpr void ntt_2point(ModIntTy<T> &sum, ModIntTy<T> &diff)
-            {
-                ModIntTy<T> tmp1 = sum;
-                ModIntTy<T> tmp2 = diff;
-                sum = tmp1 + tmp2;
-                diff = tmp1 - tmp2;
-            }
-            template <typename T>
-            static constexpr void ntt_dit_4point(ModIntTy<T> *input, size_t rank = 1)
-            {
-                constexpr ModIntTy<T> W_4_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 4); // 等价于复数i
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 2];
-                ModIntTy<T> tmp3 = input[rank * 3];
-
-                ntt_2point(tmp0, tmp1);
-                ntt_2point(tmp2, tmp3);
-                tmp3 = tmp3 * W_4_1;
-
-                input[0] = tmp0 + tmp2;
-                input[rank] = tmp1 + tmp3;
-                input[rank * 2] = tmp0 - tmp2;
-                input[rank * 3] = tmp1 - tmp3;
-            }
-            template <typename T>
-            static constexpr void ntt_dit_8point(ModIntTy<T> *input, size_t rank = 1)
-            {
-                constexpr ModIntTy<T> W_8_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 8);
-                constexpr ModIntTy<T> W_8_2 = W_8_1.power(2);
-                constexpr ModIntTy<T> W_8_3 = W_8_1.power(3);
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 2];
-                ModIntTy<T> tmp3 = input[rank * 3];
-                ModIntTy<T> tmp4 = input[rank * 4];
-                ModIntTy<T> tmp5 = input[rank * 5];
-                ModIntTy<T> tmp6 = input[rank * 6];
-                ModIntTy<T> tmp7 = input[rank * 7];
-                ntt_2point(tmp0, tmp1);
-                ntt_2point(tmp2, tmp3);
-                ntt_2point(tmp4, tmp5);
-                ntt_2point(tmp6, tmp7);
-                tmp3 = tmp3 * W_8_2;
-                tmp7 = tmp7 * W_8_2;
-
-                ntt_2point(tmp0, tmp2);
-                ntt_2point(tmp1, tmp3);
-                ntt_2point(tmp4, tmp6);
-                ntt_2point(tmp5, tmp7);
-                tmp5 = tmp5 * W_8_1;
-                tmp6 = tmp6 * W_8_2;
-                tmp7 = tmp7 * W_8_3;
-
-                input[0] = tmp0 + tmp4;
-                input[rank] = tmp1 + tmp5;
-                input[rank * 2] = tmp2 + tmp6;
-                input[rank * 3] = tmp3 + tmp7;
-                input[rank * 4] = tmp0 - tmp4;
-                input[rank * 5] = tmp1 - tmp5;
-                input[rank * 6] = tmp2 - tmp6;
-                input[rank * 7] = tmp3 - tmp7;
-            }
-            template <typename T>
-            static constexpr void ntt_dit_16point(ModIntTy<T> *input, size_t rank = 1)
-            {
-                constexpr ModIntTy<T> W_16_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 16);
-                constexpr ModIntTy<T> W_16_2 = W_16_1.power(2);
-                constexpr ModIntTy<T> W_16_3 = W_16_1.power(3);
-                constexpr ModIntTy<T> W_16_4 = W_16_1.power(4);
-                constexpr ModIntTy<T> W_16_5 = W_16_1.power(5);
-                constexpr ModIntTy<T> W_16_6 = W_16_1.power(6);
-                constexpr ModIntTy<T> W_16_7 = W_16_1.power(7);
-
-                ntt_dit_8point(input, rank);
-                ntt_dit_8point(input + rank * 8, rank);
-
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 8];
-                ModIntTy<T> tmp3 = input[rank * 9] * W_16_1;
-                input[0] = tmp0 + tmp2;
-                input[rank] = tmp1 + tmp3;
-                input[rank * 8] = tmp0 - tmp2;
-                input[rank * 9] = tmp1 - tmp3;
-
-                tmp0 = input[rank * 2];
-                tmp1 = input[rank * 3];
-                tmp2 = input[rank * 10] * W_16_2;
-                tmp3 = input[rank * 11] * W_16_3;
-                input[rank * 2] = tmp0 + tmp2;
-                input[rank * 3] = tmp1 + tmp3;
-                input[rank * 10] = tmp0 - tmp2;
-                input[rank * 11] = tmp1 - tmp3;
-
-                tmp0 = input[rank * 4];
-                tmp1 = input[rank * 5];
-                tmp2 = input[rank * 12] * W_16_4;
-                tmp3 = input[rank * 13] * W_16_5;
-                input[rank * 4] = tmp0 + tmp2;
-                input[rank * 5] = tmp1 + tmp3;
-                input[rank * 12] = tmp0 - tmp2;
-                input[rank * 13] = tmp1 - tmp3;
-
-                tmp0 = input[rank * 6];
-                tmp1 = input[rank * 7];
-                tmp2 = input[rank * 14] * W_16_6;
-                tmp3 = input[rank * 15] * W_16_7;
-                input[rank * 6] = tmp0 + tmp2;
-                input[rank * 7] = tmp1 + tmp3;
-                input[rank * 14] = tmp0 - tmp2;
-                input[rank * 15] = tmp1 - tmp3;
-            }
-            template <typename T>
-            static constexpr void ntt_dif_4point(ModIntTy<T> *input, size_t rank = 1)
-            {
-                constexpr ModIntTy<T> W_4_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 4); // 等价于复数i
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 2];
-                ModIntTy<T> tmp3 = input[rank * 3];
-
-                ntt_2point(tmp0, tmp2);
-                ntt_2point(tmp1, tmp3);
-                tmp3 = tmp3 * W_4_1;
-
-                input[0] = tmp0 + tmp1;
-                input[rank] = tmp0 - tmp1;
-                input[rank * 2] = tmp2 + tmp3;
-                input[rank * 3] = tmp2 - tmp3;
-            }
-            template <typename T>
-            static constexpr void ntt_dif_8point(ModIntTy<T> *input, size_t rank = 1)
-            {
-                constexpr ModIntTy<T> W_8_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 8);
-                constexpr ModIntTy<T> W_8_2 = W_8_1.power(2);
-                constexpr ModIntTy<T> W_8_3 = W_8_1.power(3);
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 2];
-                ModIntTy<T> tmp3 = input[rank * 3];
-                ModIntTy<T> tmp4 = input[rank * 4];
-                ModIntTy<T> tmp5 = input[rank * 5];
-                ModIntTy<T> tmp6 = input[rank * 6];
-                ModIntTy<T> tmp7 = input[rank * 7];
-
-                ntt_2point(tmp0, tmp4);
-                ntt_2point(tmp1, tmp5);
-                ntt_2point(tmp2, tmp6);
-                ntt_2point(tmp3, tmp7);
-                tmp5 = tmp5 * W_8_1;
-                tmp6 = tmp6 * W_8_2;
-                tmp7 = tmp7 * W_8_3;
-
-                ntt_2point(tmp0, tmp2);
-                ntt_2point(tmp1, tmp3);
-                ntt_2point(tmp4, tmp6);
-                ntt_2point(tmp5, tmp7);
-                tmp3 = tmp3 * W_8_2;
-                tmp7 = tmp7 * W_8_2;
-
-                input[0] = tmp0 + tmp1;
-                input[rank] = tmp0 - tmp1;
-                input[rank * 2] = tmp2 + tmp3;
-                input[rank * 3] = tmp2 - tmp3;
-                input[rank * 4] = tmp4 + tmp5;
-                input[rank * 5] = tmp4 - tmp5;
-                input[rank * 6] = tmp6 + tmp7;
-                input[rank * 7] = tmp6 - tmp7;
-            }
-            template <typename T>
-            static constexpr void ntt_dif_16point(ModIntTy<T> *input, size_t rank = 1)
-            {
-                constexpr ModIntTy<T> W_16_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 16);
-                constexpr ModIntTy<T> W_16_2 = W_16_1.power(2);
-                constexpr ModIntTy<T> W_16_3 = W_16_1.power(3);
-                constexpr ModIntTy<T> W_16_4 = W_16_1.power(4);
-                constexpr ModIntTy<T> W_16_5 = W_16_1.power(5);
-                constexpr ModIntTy<T> W_16_6 = W_16_1.power(6);
-                constexpr ModIntTy<T> W_16_7 = W_16_1.power(7);
-
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 8];
-                ModIntTy<T> tmp3 = input[rank * 9];
-                input[0] = tmp0 + tmp2;
-                input[rank] = tmp1 + tmp3;
-                input[rank * 8] = tmp0 - tmp2;
-                input[rank * 9] = (tmp1 - tmp3) * W_16_1;
-
-                tmp0 = input[rank * 2];
-                tmp1 = input[rank * 3];
-                tmp2 = input[rank * 10];
-                tmp3 = input[rank * 11];
-                input[rank * 2] = tmp0 + tmp2;
-                input[rank * 3] = tmp1 + tmp3;
-                input[rank * 10] = (tmp0 - tmp2) * W_16_2;
-                input[rank * 11] = (tmp1 - tmp3) * W_16_3;
-
-                tmp0 = input[rank * 4];
-                tmp1 = input[rank * 5];
-                tmp2 = input[rank * 12];
-                tmp3 = input[rank * 13];
-                input[rank * 4] = tmp0 + tmp2;
-                input[rank * 5] = tmp1 + tmp3;
-                input[rank * 12] = (tmp0 - tmp2) * W_16_4;
-                input[rank * 13] = (tmp1 - tmp3) * W_16_5;
-
-                tmp0 = input[rank * 6];
-                tmp1 = input[rank * 7];
-                tmp2 = input[rank * 14];
-                tmp3 = input[rank * 15];
-                input[rank * 6] = tmp0 + tmp2;
-                input[rank * 7] = tmp1 + tmp3;
-                input[rank * 14] = (tmp0 - tmp2) * W_16_6;
-                input[rank * 15] = (tmp1 - tmp3) * W_16_7;
-
-                ntt_dif_8point(input, rank);
-                ntt_dif_8point(input + rank * 8, rank);
-            }
-            // 基2时间抽取ntt蝶形
-            template <typename T>
-            static constexpr void ntt_radix2_dit_butterfly(ModIntTy<T> omega, ModIntTy<T> *input, size_t rank)
-            {
-                ModIntTy<T> tmp1 = input[0];
-                ModIntTy<T> tmp2 = input[rank] * omega;
-                input[0] = tmp1 + tmp2;
-                input[rank] = tmp1 - tmp2;
-            }
-            // 基2频率抽取ntt蝶形
-            template <typename T>
-            static constexpr void ntt_radix2_dif_butterfly(ModIntTy<T> omega, ModIntTy<T> *input, size_t rank)
-            {
-                ModIntTy<T> tmp1 = input[0];
-                ModIntTy<T> tmp2 = input[rank];
-                input[0] = tmp1 + tmp2;
-                input[rank] = (tmp1 - tmp2) * omega;
-            }
-            // ntt分裂基时间抽取蝶形变换
-            template <typename T>
-            static constexpr void ntt_split_radix_dit_butterfly(ModIntTy<T> omega, ModIntTy<T> omega_cube,
-                                                                ModIntTy<T> *input, size_t rank)
-            {
-                constexpr ModIntTy<T> W_4_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 4); // 等价于复数i
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 2] * omega;
-                ModIntTy<T> tmp3 = input[rank * 3] * omega_cube;
-
-                ntt_2point(tmp2, tmp3);
-                tmp3 = tmp3 * W_4_1;
-
-                input[0] = tmp0 + tmp2;
-                input[rank] = tmp1 + tmp3;
-                input[rank * 2] = tmp0 - tmp2;
-                input[rank * 3] = tmp1 - tmp3;
-            }
-            // ntt分裂基频率抽取蝶形变换
-            template <typename T>
-            static constexpr void ntt_split_radix_dif_butterfly(ModIntTy<T> omega, ModIntTy<T> omega_cube,
-                                                                ModIntTy<T> *input, size_t rank)
-            {
-                constexpr ModIntTy<T> W_4_1 = ModIntTy<T>(G_ROOT).power((MOD - 1) / 4); // 等价于复数i
-                ModIntTy<T> tmp0 = input[0];
-                ModIntTy<T> tmp1 = input[rank];
-                ModIntTy<T> tmp2 = input[rank * 2];
-                ModIntTy<T> tmp3 = input[rank * 3];
-
-                ntt_2point(tmp0, tmp2);
-                ntt_2point(tmp1, tmp3);
-                tmp3 = tmp3 * W_4_1;
-
-                input[0] = tmp0;
-                input[rank] = tmp1;
-                input[rank * 2] = (tmp2 + tmp3) * omega;
-                input[rank * 3] = (tmp2 - tmp3) * omega_cube;
-            }
-            // 基2时间抽取ntt
-            template <typename T>
-            static void ntt_radix2_dit(ModIntTy<T> *input, size_t ntt_len, bool bit_rev = true)
-            {
-                ntt_len = max_2pow(ntt_len);
-                if (ntt_len <= 1)
-                {
-                    return;
-                }
-                if (ntt_len == 2)
-                {
-                    ntt_2point(input[0], input[1]);
-                    return;
-                }
-                if (bit_rev)
-                {
-                    binary_reverse_swap(input, ntt_len);
-                }
-                for (size_t pos = 0; pos < ntt_len; pos += 2)
-                {
-                    ntt_2point(input[pos], input[pos + 1]);
-                }
-                for (size_t rank = 2; rank < ntt_len / 2; rank *= 2)
-                {
-                    size_t gap = rank * 2;
-                    ModIntTy<T> unit_omega = ModIntTy<T>(G_ROOT).power((MOD - 1) / gap);
-                    for (size_t begin = 0; begin < ntt_len; begin += (gap * 2))
+                    for (size_t i = ntt_len; i < ntt_len + mod4; i++)
                     {
-                        ntt_2point(input[begin], input[begin + rank]);
-                        ntt_2point(input[begin + gap], input[begin + rank + gap]);
-                        ModIntTy<T> omega = unit_omega;
-                        for (size_t pos = begin + 1; pos < begin + rank; pos++)
-                        {
-                            ntt_radix2_dit_butterfly(omega, input + pos, rank);
-                            ntt_radix2_dit_butterfly(omega, input + pos + gap, rank);
-                            omega = omega * unit_omega;
-                        }
+                        input[i] = inv * input[i];
                     }
                 }
-                ModIntTy<T> omega = 1, unit_omega = ModIntTy<T>(G_ROOT).power((MOD - 1) / ntt_len);
-                ntt_len /= 2;
-                for (size_t pos = 0; pos < ntt_len; pos++)
+                // 2点NTT
+                template <typename T>
+                static constexpr void ntt_2point(T &sum, T &diff)
                 {
-                    ntt_radix2_dit_butterfly(omega, input + pos, ntt_len);
-                    omega = omega * unit_omega;
+                    T tmp1 = sum;
+                    T tmp2 = diff;
+                    sum = tmp1 + tmp2;
+                    diff = tmp1 - tmp2;
                 }
-            }
-            // 基2频率抽取ntt
-            template <typename T>
-            static void ntt_radix2_dif(ModIntTy<T> *input, size_t ntt_len, bool bit_rev = true)
+                template <typename T>
+                static constexpr void ntt_dit_4point(T *input, size_t rank = 1)
+                {
+                    constexpr T W_4_1 = qpow(T(ROOT), (MOD - 1) / 4); // 等价于复数i
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 2];
+                    T tmp3 = input[rank * 3];
+
+                    ntt_2point(tmp0, tmp1);
+                    ntt_2point(tmp2, tmp3);
+                    tmp3 = tmp3 * W_4_1;
+
+                    input[0] = tmp0 + tmp2;
+                    input[rank] = tmp1 + tmp3;
+                    input[rank * 2] = tmp0 - tmp2;
+                    input[rank * 3] = tmp1 - tmp3;
+                }
+                template <typename T>
+                static constexpr void ntt_dit_8point(T *input, size_t rank = 1)
+                {
+                    constexpr T W_8_1 = qpow(T(ROOT), (MOD - 1) / 8);
+                    constexpr T W_8_2 = qpow(W_8_1, 2);
+                    constexpr T W_8_3 = qpow(W_8_1, 3);
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 2];
+                    T tmp3 = input[rank * 3];
+                    T tmp4 = input[rank * 4];
+                    T tmp5 = input[rank * 5];
+                    T tmp6 = input[rank * 6];
+                    T tmp7 = input[rank * 7];
+                    ntt_2point(tmp0, tmp1);
+                    ntt_2point(tmp2, tmp3);
+                    ntt_2point(tmp4, tmp5);
+                    ntt_2point(tmp6, tmp7);
+                    tmp3 = tmp3 * W_8_2;
+                    tmp7 = tmp7 * W_8_2;
+
+                    ntt_2point(tmp0, tmp2);
+                    ntt_2point(tmp1, tmp3);
+                    ntt_2point(tmp4, tmp6);
+                    ntt_2point(tmp5, tmp7);
+                    tmp5 = tmp5 * W_8_1;
+                    tmp6 = tmp6 * W_8_2;
+                    tmp7 = tmp7 * W_8_3;
+
+                    input[0] = tmp0 + tmp4;
+                    input[rank] = tmp1 + tmp5;
+                    input[rank * 2] = tmp2 + tmp6;
+                    input[rank * 3] = tmp3 + tmp7;
+                    input[rank * 4] = tmp0 - tmp4;
+                    input[rank * 5] = tmp1 - tmp5;
+                    input[rank * 6] = tmp2 - tmp6;
+                    input[rank * 7] = tmp3 - tmp7;
+                }
+                template <typename T>
+                static constexpr void ntt_dit_16point(T *input, size_t rank = 1)
+                {
+                    constexpr T W_16_1 = qpow(T(ROOT), (MOD - 1) / 16);
+                    constexpr T W_16_2 = qpow(W_16_1, 2);
+                    constexpr T W_16_3 = qpow(W_16_1, 3);
+                    constexpr T W_16_4 = qpow(W_16_1, 4);
+                    constexpr T W_16_5 = qpow(W_16_1, 5);
+                    constexpr T W_16_6 = qpow(W_16_1, 6);
+                    constexpr T W_16_7 = qpow(W_16_1, 7);
+
+                    ntt_dit_8point(input, rank);
+                    ntt_dit_8point(input + rank * 8, rank);
+
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 8];
+                    T tmp3 = input[rank * 9] * W_16_1;
+                    input[0] = tmp0 + tmp2;
+                    input[rank] = tmp1 + tmp3;
+                    input[rank * 8] = tmp0 - tmp2;
+                    input[rank * 9] = tmp1 - tmp3;
+
+                    tmp0 = input[rank * 2];
+                    tmp1 = input[rank * 3];
+                    tmp2 = input[rank * 10] * W_16_2;
+                    tmp3 = input[rank * 11] * W_16_3;
+                    input[rank * 2] = tmp0 + tmp2;
+                    input[rank * 3] = tmp1 + tmp3;
+                    input[rank * 10] = tmp0 - tmp2;
+                    input[rank * 11] = tmp1 - tmp3;
+
+                    tmp0 = input[rank * 4];
+                    tmp1 = input[rank * 5];
+                    tmp2 = input[rank * 12] * W_16_4;
+                    tmp3 = input[rank * 13] * W_16_5;
+                    input[rank * 4] = tmp0 + tmp2;
+                    input[rank * 5] = tmp1 + tmp3;
+                    input[rank * 12] = tmp0 - tmp2;
+                    input[rank * 13] = tmp1 - tmp3;
+
+                    tmp0 = input[rank * 6];
+                    tmp1 = input[rank * 7];
+                    tmp2 = input[rank * 14] * W_16_6;
+                    tmp3 = input[rank * 15] * W_16_7;
+                    input[rank * 6] = tmp0 + tmp2;
+                    input[rank * 7] = tmp1 + tmp3;
+                    input[rank * 14] = tmp0 - tmp2;
+                    input[rank * 15] = tmp1 - tmp3;
+                }
+                template <typename T>
+                static constexpr void ntt_dif_4point(T *input, size_t rank = 1)
+                {
+                    constexpr T W_4_1 = qpow(T(ROOT), (MOD - 1) / 4);
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 2];
+                    T tmp3 = input[rank * 3];
+
+                    ntt_2point(tmp0, tmp2);
+                    ntt_2point(tmp1, tmp3);
+                    tmp3 = tmp3 * W_4_1;
+
+                    input[0] = tmp0 + tmp1;
+                    input[rank] = tmp0 - tmp1;
+                    input[rank * 2] = tmp2 + tmp3;
+                    input[rank * 3] = tmp2 - tmp3;
+                }
+                template <typename T>
+                static constexpr void ntt_dif_8point(T *input, size_t rank = 1)
+                {
+                    constexpr T W_8_1 = qpow(T(ROOT), (MOD - 1) / 8);
+                    constexpr T W_8_2 = qpow(W_8_1, 2);
+                    constexpr T W_8_3 = qpow(W_8_1, 3);
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 2];
+                    T tmp3 = input[rank * 3];
+                    T tmp4 = input[rank * 4];
+                    T tmp5 = input[rank * 5];
+                    T tmp6 = input[rank * 6];
+                    T tmp7 = input[rank * 7];
+
+                    ntt_2point(tmp0, tmp4);
+                    ntt_2point(tmp1, tmp5);
+                    ntt_2point(tmp2, tmp6);
+                    ntt_2point(tmp3, tmp7);
+                    tmp5 = tmp5 * W_8_1;
+                    tmp6 = tmp6 * W_8_2;
+                    tmp7 = tmp7 * W_8_3;
+
+                    ntt_2point(tmp0, tmp2);
+                    ntt_2point(tmp1, tmp3);
+                    ntt_2point(tmp4, tmp6);
+                    ntt_2point(tmp5, tmp7);
+                    tmp3 = tmp3 * W_8_2;
+                    tmp7 = tmp7 * W_8_2;
+
+                    input[0] = tmp0 + tmp1;
+                    input[rank] = tmp0 - tmp1;
+                    input[rank * 2] = tmp2 + tmp3;
+                    input[rank * 3] = tmp2 - tmp3;
+                    input[rank * 4] = tmp4 + tmp5;
+                    input[rank * 5] = tmp4 - tmp5;
+                    input[rank * 6] = tmp6 + tmp7;
+                    input[rank * 7] = tmp6 - tmp7;
+                }
+                template <typename T>
+                static constexpr void ntt_dif_16point(T *input, size_t rank = 1)
+                {
+                    constexpr T W_16_1 = qpow(T(ROOT), (MOD - 1) / 16);
+                    constexpr T W_16_2 = qpow(W_16_1, 2);
+                    constexpr T W_16_3 = qpow(W_16_1, 3);
+                    constexpr T W_16_4 = qpow(W_16_1, 4);
+                    constexpr T W_16_5 = qpow(W_16_1, 5);
+                    constexpr T W_16_6 = qpow(W_16_1, 6);
+                    constexpr T W_16_7 = qpow(W_16_1, 7);
+
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 8];
+                    T tmp3 = input[rank * 9];
+                    input[0] = tmp0 + tmp2;
+                    input[rank] = tmp1 + tmp3;
+                    input[rank * 8] = tmp0 - tmp2;
+                    input[rank * 9] = (tmp1 - tmp3) * W_16_1;
+
+                    tmp0 = input[rank * 2];
+                    tmp1 = input[rank * 3];
+                    tmp2 = input[rank * 10];
+                    tmp3 = input[rank * 11];
+                    input[rank * 2] = tmp0 + tmp2;
+                    input[rank * 3] = tmp1 + tmp3;
+                    input[rank * 10] = (tmp0 - tmp2) * W_16_2;
+                    input[rank * 11] = (tmp1 - tmp3) * W_16_3;
+
+                    tmp0 = input[rank * 4];
+                    tmp1 = input[rank * 5];
+                    tmp2 = input[rank * 12];
+                    tmp3 = input[rank * 13];
+                    input[rank * 4] = tmp0 + tmp2;
+                    input[rank * 5] = tmp1 + tmp3;
+                    input[rank * 12] = (tmp0 - tmp2) * W_16_4;
+                    input[rank * 13] = (tmp1 - tmp3) * W_16_5;
+
+                    tmp0 = input[rank * 6];
+                    tmp1 = input[rank * 7];
+                    tmp2 = input[rank * 14];
+                    tmp3 = input[rank * 15];
+                    input[rank * 6] = tmp0 + tmp2;
+                    input[rank * 7] = tmp1 + tmp3;
+                    input[rank * 14] = (tmp0 - tmp2) * W_16_6;
+                    input[rank * 15] = (tmp1 - tmp3) * W_16_7;
+
+                    ntt_dif_8point(input, rank);
+                    ntt_dif_8point(input + rank * 8, rank);
+                }
+                // 基2时间抽取ntt蝶形
+                template <typename T>
+                static constexpr void ntt_radix2_dit_butterfly(T omega, T *input, size_t rank)
+                {
+                    T tmp1 = input[0];
+                    T tmp2 = input[rank] * omega;
+                    input[0] = tmp1 + tmp2;
+                    input[rank] = tmp1 - tmp2;
+                }
+                // 基2频率抽取ntt蝶形
+                template <typename T>
+                static constexpr void ntt_radix2_dif_butterfly(T omega, T *input, size_t rank)
+                {
+                    T tmp1 = input[0];
+                    T tmp2 = input[rank];
+                    input[0] = tmp1 + tmp2;
+                    input[rank] = (tmp1 - tmp2) * omega;
+                }
+                // ntt分裂基时间抽取蝶形变换
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_butterfly(T omega, T omega_cube,
+                                                                    T *input, size_t rank)
+                {
+                    constexpr T W_4_1 = qpow(T(ROOT), (MOD - 1) / 4); // 等价于复数i
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 2] * omega;
+                    T tmp3 = input[rank * 3] * omega_cube;
+
+                    ntt_2point(tmp2, tmp3);
+                    tmp3 = tmp3 * W_4_1;
+
+                    input[0] = tmp0 + tmp2;
+                    input[rank] = tmp1 + tmp3;
+                    input[rank * 2] = tmp0 - tmp2;
+                    input[rank * 3] = tmp1 - tmp3;
+                }
+                // ntt分裂基频率抽取蝶形变换
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_butterfly(T omega, T omega_cube,
+                                                                    T *input, size_t rank)
+                {
+                    constexpr T W_4_1 = qpow(T(ROOT), (MOD - 1) / 4); // 等价于复数i
+                    T tmp0 = input[0];
+                    T tmp1 = input[rank];
+                    T tmp2 = input[rank * 2];
+                    T tmp3 = input[rank * 3];
+
+                    ntt_2point(tmp0, tmp2);
+                    ntt_2point(tmp1, tmp3);
+                    tmp3 = tmp3 * W_4_1;
+
+                    input[0] = tmp0;
+                    input[rank] = tmp1;
+                    input[rank * 2] = (tmp2 + tmp3) * omega;
+                    input[rank * 3] = (tmp2 - tmp3) * omega_cube;
+                }
+            };
+            // 模板递归分裂基NTT
+            template <size_t LEN, UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT
             {
-                ntt_len = max_2pow(ntt_len);
-                if (ntt_len <= 1)
+                using ntt_basic = NTT_BASIC<MOD, ROOT>;
+                static constexpr size_t half_len = LEN / 2, quarter_len = LEN / 4;
+                // 模板化时间抽取分裂基ntt
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[])
                 {
-                    return;
-                }
-                if (ntt_len == 2)
-                {
-                    ntt_2point(input[0], input[1]);
-                    return;
-                }
-                ModIntTy<T> unit_omega = ModIntTy<T>(G_ROOT).power((MOD - 1) / ntt_len);
-                ModIntTy<T> omega = 1;
-                for (size_t pos = 0; pos < ntt_len / 2; pos++)
-                {
-                    ntt_radix2_dif_butterfly(omega, input + pos, ntt_len / 2);
-                    omega = omega * unit_omega;
-                }
-                unit_omega = unit_omega * unit_omega;
-                for (size_t rank = ntt_len / 4; rank > 1; rank /= 2)
-                {
-                    size_t gap = rank * 2;
-                    for (size_t begin = 0; begin < ntt_len; begin += (gap * 2))
+                    SPLIT_RADIX_NTT<half_len, MOD, ROOT>::ntt_split_radix_dit_template(input);
+                    SPLIT_RADIX_NTT<quarter_len, MOD, ROOT>::ntt_split_radix_dit_template(input + half_len);
+                    SPLIT_RADIX_NTT<quarter_len, MOD, ROOT>::ntt_split_radix_dit_template(input + half_len + quarter_len);
+                    constexpr T unit = qpow(T(ROOT), (MOD - 1) / LEN);
+                    constexpr T unit_cube = qpow(unit, 3);
+                    T omega(1), omega_cube(1);
+                    for (size_t i = 0; i < quarter_len; i++)
                     {
-                        ntt_2point(input[begin], input[begin + rank]);
-                        ntt_2point(input[begin + gap], input[begin + rank + gap]);
-                        ModIntTy<T> omega = unit_omega;
-                        for (size_t pos = begin + 1; pos < begin + rank; pos++)
+                        ntt_basic::ntt_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
+                        omega = omega * unit;
+                        omega_cube = omega_cube * unit_cube;
+                    }
+                }
+                // 模板化频率抽取分裂基ntt
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[])
+                {
+                    constexpr T unit = qpow(T(ROOT), (MOD - 1) / LEN);
+                    constexpr T unit_cube = qpow(unit, 3);
+                    T omega(1), omega_cube(1);
+                    for (size_t i = 0; i < quarter_len; i++)
+                    {
+                        ntt_basic::ntt_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
+                        omega = omega * unit;
+                        omega_cube = omega_cube * unit_cube;
+                    }
+                    SPLIT_RADIX_NTT<half_len, MOD, ROOT>::ntt_split_radix_dif_template(input);
+                    SPLIT_RADIX_NTT<quarter_len, MOD, ROOT>::ntt_split_radix_dif_template(input + half_len);
+                    SPLIT_RADIX_NTT<quarter_len, MOD, ROOT>::ntt_split_radix_dif_template(input + half_len + quarter_len);
+                }
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT<0, MOD, ROOT>
+            {
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[]) {}
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[]) {}
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT<1, MOD, ROOT>
+            {
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[]) {}
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[]) {}
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT<2, MOD, ROOT>
+            {
+                using ntt_basic = NTT_BASIC<MOD, ROOT>;
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[])
+                {
+                    ntt_basic::ntt_2point(input[0], input[1]);
+                }
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[])
+                {
+                    ntt_basic::ntt_2point(input[0], input[1]);
+                }
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT<4, MOD, ROOT>
+            {
+                using ntt_basic = NTT_BASIC<MOD, ROOT>;
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[])
+                {
+                    ntt_basic::ntt_dit_4point(input, 1);
+                }
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[])
+                {
+                    ntt_basic::ntt_dif_4point(input, 1);
+                }
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT<8, MOD, ROOT>
+            {
+                using ntt_basic = NTT_BASIC<MOD, ROOT>;
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[])
+                {
+                    ntt_basic::ntt_dit_8point(input, 1);
+                }
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[])
+                {
+                    ntt_basic::ntt_dif_8point(input, 1);
+                }
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct SPLIT_RADIX_NTT<16, MOD, ROOT>
+            {
+                using ntt_basic = NTT_BASIC<MOD, ROOT>;
+                template <typename T>
+                static constexpr void ntt_split_radix_dit_template(T input[])
+                {
+                    ntt_basic::ntt_dit_16point(input, 1);
+                }
+                template <typename T>
+                static constexpr void ntt_split_radix_dif_template(T input[])
+                {
+                    ntt_basic::ntt_dif_16point(input, 1);
+                }
+            };
+            // 分裂基辅助选择类
+            template <size_t LEN, UINT_64 MOD, UINT_64 ROOT>
+            struct NTT_ALT
+            {
+                template <typename T>
+                static constexpr void ntt_dit_template(T input[], size_t ntt_len)
+                {
+                    if (ntt_len > LEN)
+                    {
+                        NTT_ALT<LEN * 2, MOD, ROOT>::ntt_dit_template(input, ntt_len);
+                        return;
+                    }
+                    SPLIT_RADIX_NTT<LEN, MOD, ROOT>::ntt_split_radix_dit_template(input);
+                }
+                template <typename T>
+                static constexpr void ntt_dif_template(T input[], size_t ntt_len)
+                {
+                    if (ntt_len > LEN)
+                    {
+                        NTT_ALT<LEN * 2, MOD, ROOT>::ntt_dif_template(input, ntt_len);
+                        return;
+                    }
+                    SPLIT_RADIX_NTT<LEN, MOD, ROOT>::ntt_split_radix_dif_template(input);
+                }
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct NTT_ALT<size_t(1) << 43, MOD, ROOT>
+            {
+                template <typename T>
+                static constexpr void ntt_dit_template(T input[], size_t ntt_len) {}
+                template <typename T>
+                static constexpr void ntt_dif_template(T input[], size_t ntt_len) {}
+            };
+            template <UINT_64 MOD, UINT_64 ROOT>
+            struct NTT
+            {
+                using ntt_basic = NTT_BASIC<MOD, ROOT>;
+                using NTTModInt32 = ModInt<UINT_32, MOD>;
+                using NTTModInt64 = ModInt<UINT_64, MOD>;
+                static constexpr UINT_64 mod()
+                {
+                    return MOD;
+                }
+                static constexpr UINT_64 root()
+                {
+                    return ROOT;
+                }
+                static constexpr UINT_64 iroot()
+                {
+                    return NTTModInt64(ROOT).inv().data;
+                }
+                // 基2时间抽取ntt,学习用
+                template <typename T>
+                static void ntt_radix2_dit(T *input, size_t ntt_len, bool bit_rev = true)
+                {
+                    ntt_len = max_2pow(ntt_len);
+                    if (ntt_len <= 1)
+                    {
+                        return;
+                    }
+                    if (ntt_len == 2)
+                    {
+                        ntt_basic::ntt_2point(input[0], input[1]);
+                        return;
+                    }
+                    if (bit_rev)
+                    {
+                        binary_reverse_swap(input, ntt_len);
+                    }
+                    for (size_t pos = 0; pos < ntt_len; pos += 2)
+                    {
+                        ntt_basic::ntt_2point(input[pos], input[pos + 1]);
+                    }
+                    for (size_t rank = 2; rank < ntt_len / 2; rank *= 2)
+                    {
+                        size_t gap = rank * 2;
+                        T unit_omega = qpow(T(ROOT), (MOD - 1) / gap);
+                        for (size_t begin = 0; begin < ntt_len; begin += (gap * 2))
                         {
-                            ntt_radix2_dif_butterfly(omega, input + pos, rank);
-                            ntt_radix2_dif_butterfly(omega, input + pos + gap, rank);
-                            omega = omega * unit_omega;
+                            ntt_basic::ntt_2point(input[begin], input[begin + rank]);
+                            ntt_basic::ntt_2point(input[begin + gap], input[begin + rank + gap]);
+                            T omega = unit_omega;
+                            for (size_t pos = begin + 1; pos < begin + rank; pos++)
+                            {
+                                ntt_basic::ntt_radix2_dit_butterfly(omega, input + pos, rank);
+                                ntt_basic::ntt_radix2_dit_butterfly(omega, input + pos + gap, rank);
+                                omega = omega * unit_omega;
+                            }
                         }
+                    }
+                    T omega = 1, unit_omega = qpow(T(ROOT), (MOD - 1) / ntt_len);
+                    ntt_len /= 2;
+                    for (size_t pos = 0; pos < ntt_len; pos++)
+                    {
+                        ntt_basic::ntt_radix2_dit_butterfly(omega, input + pos, ntt_len);
+                        omega = omega * unit_omega;
+                    }
+                }
+                // 基2频率抽取ntt,学习用
+                template <typename T>
+                static void ntt_radix2_dif(T *input, size_t ntt_len, bool bit_rev = true)
+                {
+                    ntt_len = max_2pow(ntt_len);
+                    if (ntt_len <= 1)
+                    {
+                        return;
+                    }
+                    if (ntt_len == 2)
+                    {
+                        ntt_basic::ntt_2point(input[0], input[1]);
+                        return;
+                    }
+                    T unit_omega = qpow(T(ROOT), (MOD - 1) / ntt_len);
+                    T omega = 1;
+                    for (size_t pos = 0; pos < ntt_len / 2; pos++)
+                    {
+                        ntt_basic::ntt_radix2_dif_butterfly(omega, input + pos, ntt_len / 2);
+                        omega = omega * unit_omega;
                     }
                     unit_omega = unit_omega * unit_omega;
+                    for (size_t rank = ntt_len / 4; rank > 1; rank /= 2)
+                    {
+                        size_t gap = rank * 2;
+                        for (size_t begin = 0; begin < ntt_len; begin += (gap * 2))
+                        {
+                            ntt_basic::ntt_2point(input[begin], input[begin + rank]);
+                            ntt_basic::ntt_2point(input[begin + gap], input[begin + rank + gap]);
+                            T omega = unit_omega;
+                            for (size_t pos = begin + 1; pos < begin + rank; pos++)
+                            {
+                                ntt_basic::ntt_radix2_dif_butterfly(omega, input + pos, rank);
+                                ntt_basic::ntt_radix2_dif_butterfly(omega, input + pos + gap, rank);
+                                omega = omega * unit_omega;
+                            }
+                        }
+                        unit_omega = unit_omega * unit_omega;
+                    }
+                    for (size_t pos = 0; pos < ntt_len; pos += 2)
+                    {
+                        ntt_basic::ntt_2point(input[pos], input[pos + 1]);
+                    }
+                    if (bit_rev)
+                    {
+                        binary_reverse_swap(input, ntt_len);
+                    }
                 }
-                for (size_t pos = 0; pos < ntt_len; pos += 2)
+                template <typename T>
+                static constexpr void ntt_split_radix_dit(T input[], size_t ntt_len)
                 {
-                    ntt_2point(input[pos], input[pos + 1]);
+                    NTT_ALT<1, MOD, ROOT>::ntt_dit_template(input, ntt_len);
                 }
-                if (bit_rev)
+                template <typename T>
+                static constexpr void ntt_split_radix_dif(T input[], size_t ntt_len)
                 {
-                    binary_reverse_swap(input, ntt_len);
+                    NTT_ALT<1, MOD, ROOT>::ntt_dif_template(input, ntt_len);
                 }
-            }
-        };
-        template <size_t LEN, UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr size_t half_len = LEN / 2, quarter_len = LEN / 4;
-            // 模板化时间抽取分裂基ntt
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input)
-            {
-                SPLIT_RADIX_NTT<half_len, MOD, G_ROOT>::ntt_split_radix_dit_template(input);
-                SPLIT_RADIX_NTT<quarter_len, MOD, G_ROOT>::ntt_split_radix_dit_template(input + half_len);
-                SPLIT_RADIX_NTT<quarter_len, MOD, G_ROOT>::ntt_split_radix_dit_template(input + half_len + quarter_len);
-                constexpr ModInt32 unit = ModInt32(G_ROOT).power((MOD - 1) / LEN);
-                constexpr ModInt32 unit_cube = unit.power(3);
-                ModInt32 omega(1), omega_cube(1);
-                for (size_t i = 0; i < quarter_len; i++)
+                template <typename T>
+                static constexpr void ntt_dit(T input[], size_t ntt_len)
                 {
-                    NTT<MOD, G_ROOT>::ntt_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
-                    omega = omega * unit;
-                    omega_cube = omega_cube * unit_cube;
+                    ntt_split_radix_dit(input, ntt_len);
                 }
-            }
-            // 模板化频率抽取分裂基ntt
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input)
-            {
-                constexpr ModInt32 unit = ModInt32(G_ROOT).power((MOD - 1) / LEN);
-                constexpr ModInt32 unit_cube = unit.power(3);
-                ModInt32 omega(1), omega_cube(1);
-                for (size_t i = 0; i < quarter_len; i++)
+                template <typename T>
+                static constexpr void ntt_dif(T input[], size_t ntt_len)
                 {
-                    NTT<MOD, G_ROOT>::ntt_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
-                    omega = omega * unit;
-                    omega_cube = omega_cube * unit_cube;
+                    ntt_split_radix_dif(input, ntt_len);
                 }
-                SPLIT_RADIX_NTT<half_len, MOD, G_ROOT>::ntt_split_radix_dif_template(input);
-                SPLIT_RADIX_NTT<quarter_len, MOD, G_ROOT>::ntt_split_radix_dif_template(input + half_len);
-                SPLIT_RADIX_NTT<quarter_len, MOD, G_ROOT>::ntt_split_radix_dif_template(input + half_len + quarter_len);
-            }
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT<0, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input) {}
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input) {}
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT<1, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input) {}
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input) {}
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT<2, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_2point(input[0], input[1]);
-            }
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_2point(input[0], input[1]);
-            }
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT<4, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_dit_4point(input, 1);
-            }
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_dif_4point(input, 1);
-            }
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT<8, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_dit_8point(input, 1);
-            }
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_dif_8point(input, 1);
-            }
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct SPLIT_RADIX_NTT<16, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_split_radix_dit_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_dit_16point(input, 1);
-            }
-            static constexpr void ntt_split_radix_dif_template(ModInt32 *input)
-            {
-                NTT<MOD, G_ROOT>::ntt_dif_16point(input, 1);
-            }
-        };
-        template <size_t LEN, UINT_64 MOD, UINT_64 G_ROOT>
-        struct NTT_ALT
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_dit_template(ModInt32 *input, size_t ntt_len)
-            {
-                if (ntt_len > LEN)
-                {
-                    NTT_ALT<LEN * 2, MOD, G_ROOT>::ntt_dit_template(input, ntt_len);
-                    return;
-                }
-                SPLIT_RADIX_NTT<LEN, MOD, G_ROOT>::ntt_split_radix_dit_template(input);
-            }
-            static constexpr void ntt_dif_template(ModInt32 *input, size_t ntt_len)
-            {
-                if (ntt_len > LEN)
-                {
-                    NTT_ALT<LEN * 2, MOD, G_ROOT>::ntt_dif_template(input, ntt_len);
-                    return;
-                }
-                SPLIT_RADIX_NTT<LEN, MOD, G_ROOT>::ntt_split_radix_dif_template(input);
-            }
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        struct NTT_ALT<1 << 30, MOD, G_ROOT>
-        {
-            using ModInt32 = ModInt<MOD, UINT_32>;
-            static constexpr void ntt_dit_template(ModInt32 *input, size_t ntt_len) {}
-            static constexpr void ntt_dif_template(ModInt32 *input, size_t ntt_len) {}
-        };
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        inline void ntt_dit(UINT_32 *input, size_t ntt_len, bool bit_rev = true)
-        {
-            ntt_len = max_2pow(ntt_len);
-            if (bit_rev)
-            {
-                binary_reverse_swap(input, ntt_len);
-            }
-            NTT_ALT<1, MOD, G_ROOT>::ntt_dit_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
-        }
-        template <UINT_64 MOD, UINT_64 G_ROOT>
-        inline void ntt_dif(UINT_32 *input, size_t ntt_len, bool bit_rev = true)
-        {
-            ntt_len = max_2pow(ntt_len);
-            NTT_ALT<1, MOD, G_ROOT>::ntt_dif_template(reinterpret_cast<ModInt<MOD, UINT_32> *>(input), ntt_len);
-            if (bit_rev)
-            {
-                binary_reverse_swap(input, ntt_len);
-            }
+            };
+            using ntt1 = NTT<NTT_MOD1, NTT_ROOT1>;
+            using intt1 = NTT<ntt1::mod(), ntt1::iroot()>;
+
+            using ntt2 = NTT<NTT_MOD2, NTT_ROOT2>;
+            using intt2 = NTT<ntt2::mod(), ntt2::iroot()>;
+
+            using ntt3 = NTT<NTT_MOD3, NTT_ROOT3>;
+            using intt3 = NTT<ntt3::mod(), ntt3::iroot()>;
+
+            using ntt4 = NTT<NTT_MOD4, NTT_ROOT4>;
+            using intt4 = NTT<ntt4::mod(), ntt4::iroot()>;
         }
     }
 }
@@ -763,48 +862,41 @@ namespace hint
 using namespace std;
 using namespace hint;
 using namespace hint_transform;
+using namespace hint_ntt;
 template <typename T>
 vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 {
     size_t len1 = in1.size(), len2 = in2.size(), out_len = len1 + len2;
-    constexpr UINT_64 NTT_MOD1 = 3221225473;
-    constexpr UINT_64 NTT_ROOT1 = 5, I_GROOT1 = mod_inv(NTT_ROOT1, NTT_MOD1);
-    constexpr UINT_64 NTT_MOD2 = 3489660929;
-    constexpr UINT_64 NTT_ROOT2 = 3, I_GROOT2 = mod_inv(NTT_ROOT2, NTT_MOD2);
     vector<T> result(out_len);
     size_t ntt_len = min_2pow(out_len);
-    uint32_t *ary1 = new uint32_t[ntt_len]{};
-    uint32_t *ary2 = new uint32_t[ntt_len]{};
-    using ntt1 = NTT<NTT_MOD1, NTT_ROOT1>;
-    using intt1 = NTT<NTT_MOD1, I_GROOT1>;
-    using ntt2 = NTT<NTT_MOD2, NTT_ROOT2>;
-    using intt2 = NTT<NTT_MOD2, I_GROOT2>;
 
-    auto mod_ary1 = reinterpret_cast<ntt2::ModInt32 *>(ary1);
-    auto mod_ary2 = reinterpret_cast<ntt2::ModInt32 *>(ary2);
+    using ntt = ntt3;
+    using intt = intt3;
+
+    auto mod_ary1 = new ntt::NTTModInt64[ntt_len]();
+    auto mod_ary2 = new ntt::NTTModInt64[ntt_len]();
 
     for (size_t i = 0; i < len1; i++)
     {
-        ary1[i] = in1[i];
+        mod_ary1[i] = in1[i];
     }
     for (size_t i = 0; i < len2; i++)
     {
-        ary2[i] = in2[i];
+        mod_ary2[i] = in2[i];
     }
-    ntt_dif<NTT_MOD2, NTT_ROOT2>(ary1, ntt_len, false);
-    ntt_dif<NTT_MOD2, NTT_ROOT2>(ary2, ntt_len, false);
+    ntt::ntt_dif(mod_ary1, ntt_len);
+    ntt::ntt_dif(mod_ary2, ntt_len);
     ary_mul(mod_ary1, mod_ary2, mod_ary1, ntt_len);
-    ntt_dit<NTT_MOD2, I_GROOT2>(ary1, ntt_len, false);
-    // intt2::ntt_radix2_dit(mod_ary1, 64, false);
-    intt2::ntt_normalize(mod_ary1, ntt_len);
+    intt::ntt_dit(mod_ary1, ntt_len);
+    intt::ntt_basic::ntt_normalize(mod_ary1, ntt_len);
     for (size_t i = 0; i < out_len; i++)
     {
-        result[i] = ary1[i];
+        result[i] = mod_ary1[i].data;
     }
     return result;
 }
 template <typename T>
-void result_test(const vector<T> &res, T ele)
+void result_test(const vector<T> &res, UINT_64 ele)
 {
     size_t len = res.size();
     for (size_t i = 0; i < len / 2; i++)
@@ -829,20 +921,21 @@ void result_test(const vector<T> &res, T ele)
     }
     cout << "success\n";
 }
+#include <numeric>
 
 int main()
 {
     StopWatch w(1000);
     int n = 18;
     cin >> n;
-    size_t len = 1 << n; // 变换长度
-	cout << "fft len:" << len << "\n";
+    size_t len = 1ull << n; // 变换长度
+    cout << "fft len:" << len << "\n";
     uint64_t ele = 9;
     vector<uint32_t> in1(len / 2, ele);
-    vector<uint32_t> in2(len / 2, ele); // 计算两个长度为len/2，每个元素为ele的卷积
+    vector<uint32_t> in2(len / 2, ele); // 计算两个长度为len/2,每个元素为ele的卷积
     w.start();
     vector<uint32_t> res = poly_multiply(in1, in2);
     w.stop();
-    result_test<uint32_t>(res, ele); // 结果校验
+    result_test(res, ele); // 结果校验
     cout << w.duration() << "ms\n";
 }
