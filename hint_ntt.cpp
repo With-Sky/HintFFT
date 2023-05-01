@@ -870,11 +870,11 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
     vector<T> result(out_len);
     size_t ntt_len = min_2pow(out_len);
 
-    using ntt = ntt3;
-    using intt = intt3;
+    using ntt = ntt1;
+    using intt = intt1;
 
-    auto mod_ary1 = new ntt::NTTModInt64[ntt_len]();
-    auto mod_ary2 = new ntt::NTTModInt64[ntt_len]();
+    auto mod_ary1 = new ntt::NTTModInt32[ntt_len]();
+    auto mod_ary2 = new ntt::NTTModInt32[ntt_len]();
 
     for (size_t i = 0; i < len1; i++)
     {
