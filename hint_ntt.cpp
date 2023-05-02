@@ -843,18 +843,19 @@ namespace hint
                 {
                     ntt_split_radix_dif(input, ntt_len);
                 }
+                using intt = NTT<mod(), iroot()>;
             };
             using ntt1 = NTT<NTT_MOD1, NTT_ROOT1>;
-            using intt1 = NTT<ntt1::mod(), ntt1::iroot()>;
+            using intt1 = ntt1::intt;
 
             using ntt2 = NTT<NTT_MOD2, NTT_ROOT2>;
-            using intt2 = NTT<ntt2::mod(), ntt2::iroot()>;
+            using intt2 = ntt2::intt;
 
             using ntt3 = NTT<NTT_MOD3, NTT_ROOT3>;
-            using intt3 = NTT<ntt3::mod(), ntt3::iroot()>;
+            using intt3 = ntt3::intt;
 
             using ntt4 = NTT<NTT_MOD4, NTT_ROOT4>;
-            using intt4 = NTT<ntt4::mod(), ntt4::iroot()>;
+            using intt4 = ntt4::intt;
         }
     }
 }
@@ -863,6 +864,7 @@ using namespace std;
 using namespace hint;
 using namespace hint_transform;
 using namespace hint_ntt;
+
 template <typename T>
 vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 {
@@ -871,7 +873,7 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
     size_t ntt_len = min_2pow(out_len);
 
     using ntt = ntt1;
-    using intt = intt1;
+    using intt = ntt::intt;
 
     auto mod_ary1 = new ntt::NTTModInt32[ntt_len]();
     auto mod_ary2 = new ntt::NTTModInt32[ntt_len]();
@@ -893,6 +895,8 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
     {
         result[i] = mod_ary1[i].data;
     }
+    delete[] mod_ary1;
+    delete[] mod_ary2;
     return result;
 }
 template <typename T>
