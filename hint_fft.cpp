@@ -192,6 +192,16 @@ namespace hint
         }
         namespace hint_fft
         {
+            // 返回单位圆上辐角为theta的点
+            static Complex unit_root(HintFloat theta)
+            {
+                return std::polar<HintFloat>(1.0, theta);
+            }
+            // 返回单位圆上平分m份的第n个
+            static Complex unit_root(size_t m, size_t n)
+            {
+                return unit_root((HINT_2PI * n) / m);
+            }
             class ComplexTable
             {
             private:
@@ -229,27 +239,16 @@ namespace hint
                         for (size_t pos = 0; pos < vec_size / 2; pos++)
                         {
                             table[vec_size + pos * 2] = table[vec_size / 2 + pos];
-                        }
-                        for (size_t pos = 1; pos < vec_size / 2; pos += 2)
-                        {
-                            HintFloat cos_theta = std::cos(HINT_2PI * pos / len);
-                            HintFloat sin_theta = std::sin(HINT_2PI * pos / len);
-                            table[vec_size + pos] = Complex(cos_theta, sin_theta);
-                            table[vec_size * 2 - pos] = Complex(sin_theta, cos_theta);
+                            if (pos % 2 == 1)
+                            {
+                                Complex tmp = unit_root(len, pos);
+                                table[vec_size + pos] = tmp;
+                                table[vec_size * 2 - pos] = Complex(tmp.imag(), tmp.real());
+                            }
                         }
                         table[vec_size + vec_size / 2] = unit_root(8, 1);
                     }
                     cur_log_size = std::max(cur_log_size, shift);
-                }
-                // 返回单位圆上辐角为theta的点
-                static Complex unit_root(HintFloat theta)
-                {
-                    return std::polar<HintFloat>(1.0, theta);
-                }
-                // 返回单位圆上平分m份的第n个
-                static Complex unit_root(size_t m, size_t n)
-                {
-                    return unit_root((HINT_2PI * n) / m);
                 }
                 // shift表示圆平分为1<<shift份,n表示第几个单位根
                 Complex get_omega(UINT_32 shift, size_t n) const
@@ -299,8 +298,6 @@ namespace hint
                 INT_32 max_log_size = 2;
                 INT_32 cur_log_size = 2;
 
-                static constexpr size_t FAC = 3;
-
                 ComplexTableX(const ComplexTableX &) = delete;
                 ComplexTableX &operator=(const ComplexTableX &) = delete;
 
@@ -326,42 +323,34 @@ namespace hint
                     }
                     for (INT_32 i = cur_log_size + 1; i <= shift; i++)
                     {
-                        size_t len = 1ull << i, vec_size = len * FAC / 4;
+                        size_t len = 1ull << i, vec_size = len * 3 / 4;
                         table[i].resize(vec_size);
-                        for (size_t pos = 0; pos < vec_size / 2; pos++)
+                        for (size_t pos = 0; pos < len / 8; pos++)
                         {
                             table[i][pos * 2] = table[i - 1][pos];
-                        }
-                        for (size_t pos = 1; pos < len / 8; pos += 2)
-                        {
-                            HintFloat cos_theta = std::cos(HINT_2PI * pos / len);
-                            HintFloat sin_theta = std::sin(HINT_2PI * pos / len);
-                            Complex tmp1(cos_theta, -sin_theta);
-                            Complex tmp2(sin_theta, -cos_theta);
+                            table[i][pos * 2 + len / 4] = table[i - 1][pos + len / 8];
+                            table[i][pos * 2 + len / 2] = table[i - 1][pos + len / 4];
+                            if (pos % 2 == 1)
+                            {
+                                HintFloat cos_theta = std::cos(HINT_2PI * pos / len);
+                                HintFloat sin_theta = std::sin(HINT_2PI * pos / len);
+                                Complex tmp1(cos_theta, -sin_theta);
+                                Complex tmp2(sin_theta, -cos_theta);
 
-                            table[i][pos] = tmp1;
-                            table[i][pos + len / 4] = Complex(tmp1.imag(), -tmp1.real());
-                            table[i][pos + len / 2] = -tmp1;
+                                table[i][pos] = tmp1;
+                                table[i][pos + len / 4] = Complex(tmp1.imag(), -tmp1.real());
+                                table[i][pos + len / 2] = -tmp1;
 
-                            table[i][len / 4 - pos] = tmp2;
-                            table[i][len / 2 - pos] = Complex(tmp2.imag(), -tmp2.real());
-                            table[i][vec_size - pos] = -tmp2;
+                                table[i][len / 4 - pos] = tmp2;
+                                table[i][len / 2 - pos] = Complex(tmp2.imag(), -tmp2.real());
+                                table[i][vec_size - pos] = -tmp2;
+                            }
                         }
                         table[i][len / 8] = std::conj(unit_root(8, 1));
                         table[i][len * 3 / 8] = std::conj(unit_root(8, 3));
                         table[i][len * 5 / 8] = std::conj(unit_root(8, 5));
                     }
                     cur_log_size = std::max(cur_log_size, shift);
-                }
-                // 返回单位圆上辐角为theta的点
-                static Complex unit_root(HintFloat theta)
-                {
-                    return std::polar<HintFloat>(1.0, theta);
-                }
-                // 返回单位圆上平分m份的第n个
-                static Complex unit_root(size_t m, size_t n)
-                {
-                    return unit_root((HINT_2PI * n) / m);
                 }
                 // shift表示圆平分为1<<shift份,n表示第几个单位根
                 Complex get_omega(UINT_32 shift, size_t n) const
