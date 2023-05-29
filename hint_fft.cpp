@@ -1132,34 +1132,34 @@ namespace hint
             template <size_t LEN = 1>
             void fft_split_radix_dit_template_alt(Complex *input, size_t fft_len)
             {
-                if (fft_len > LEN)
+                if (fft_len < LEN)
                 {
-                    fft_split_radix_dit_template_alt<LEN * 2>(input, fft_len);
+                    fft_split_radix_dit_template_alt<LEN / 2>(input, fft_len);
                     return;
                 }
                 TABLE.expand(hint_log2(LEN));
                 fft_split_radix_dit_template<LEN>(input);
             }
             template <>
-            void fft_split_radix_dit_template_alt<1 << 24>(Complex *input, size_t fft_len) {}
+            void fft_split_radix_dit_template_alt<0>(Complex *input, size_t fft_len) {}
 
             // 辅助选择函数
             template <size_t LEN = 1>
             void fft_split_radix_dif_template_alt(Complex *input, size_t fft_len)
             {
-                if (fft_len > LEN)
+                if (fft_len < LEN)
                 {
-                    fft_split_radix_dif_template_alt<LEN * 2>(input, fft_len);
+                    fft_split_radix_dif_template_alt<LEN / 2>(input, fft_len);
                     return;
                 }
                 TABLE.expand(hint_log2(LEN));
                 fft_split_radix_dif_template<LEN>(input);
             }
             template <>
-            void fft_split_radix_dif_template_alt<1 << 24>(Complex *input, size_t fft_len) {}
+            void fft_split_radix_dif_template_alt<0>(Complex *input, size_t fft_len) {}
 
-            auto fft_split_radix_dit = fft_split_radix_dit_template_alt<1>;
-            auto fft_split_radix_dif = fft_split_radix_dif_template_alt<1>;
+            auto fft_split_radix_dit = fft_split_radix_dit_template_alt<size_t(1) << lut_max_rank>;
+            auto fft_split_radix_dif = fft_split_radix_dif_template_alt<size_t(1) << lut_max_rank>;
 
             /// @brief 时间抽取基2fft
             /// @param input 复数组
@@ -1222,6 +1222,11 @@ namespace hint
 #if MULTITHREAD == 1
             void fft_dit_2ths(Complex *input, size_t fft_len)
             {
+                if (fft_len <= 8)
+                {
+                    fft_dit(input, fft_len);
+                    return;
+                }
                 const size_t half_len = fft_len / 2;
                 const INT_32 log_len = hint_log2(fft_len);
                 TABLE.expand(log_len);
@@ -1242,6 +1247,11 @@ namespace hint
             }
             void fft_dif_2ths(Complex *input, size_t fft_len)
             {
+                if (fft_len <= 8)
+                {
+                    fft_dif(input, fft_len);
+                    return;
+                }
                 const size_t half_len = fft_len / 2;
                 const INT_32 log_len = hint_log2(fft_len);
                 TABLE.expand(log_len);
@@ -1262,6 +1272,11 @@ namespace hint
             }
             void fft_dit_4ths(Complex *input, size_t fft_len)
             {
+                if (fft_len <= 8)
+                {
+                    fft_dit(input, fft_len);
+                    return;
+                }
                 const size_t half_len = fft_len / 2;
                 const INT_32 log_len = hint_log2(fft_len);
                 TABLE.expand(log_len);
@@ -1288,6 +1303,11 @@ namespace hint
             }
             void fft_dif_4ths(Complex *input, size_t fft_len)
             {
+                if (fft_len <= 8)
+                {
+                    fft_dif(input, fft_len);
+                    return;
+                }
                 const size_t half_len = fft_len / 2;
                 const INT_32 log_len = hint_log2(fft_len);
                 TABLE.expand(log_len);
