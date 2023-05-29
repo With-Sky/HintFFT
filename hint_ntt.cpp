@@ -193,7 +193,7 @@ namespace hint
                 {
                     return qpow(*this, MOD - 2u);
                 }
-                constexpr static ModInt mod()
+                constexpr static UINT_64 mod()
                 {
                     return MOD;
                 }
@@ -241,7 +241,7 @@ namespace hint
                 {
                     return qpow(*this, MOD - 2ull);
                 }
-                constexpr static ModInt mod()
+                constexpr static UINT_64 mod()
                 {
                     return MOD;
                 }
