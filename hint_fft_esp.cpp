@@ -208,61 +208,61 @@ namespace hint
 #endif
                 }
                 void expand(INT_32 shift)
-            {
-                shift = std::max<INT_32>(shift, 2);
-                if (shift > max_log_size)
                 {
-                    throw("FFT length too long for lut\n");
-                }
-                for (INT_32 i = cur_log_size + 1; i <= shift; i++)
-                {
-                    size_t len = 1ull << i, vec_size = len * FAC / 4;
-                    table1[i].resize(vec_size);
-                    table3[i].resize(vec_size);
-                    table1[i][0] = table3[i][0] = Complex(1, 0);
-                    for (size_t pos = 0; pos < vec_size / 2; pos++)
+                    shift = std::max<INT_32>(shift, 2);
+                    if (shift > max_log_size)
                     {
-                        table1[i][pos * 2] = table1[i - 1][pos];
-                        if (pos % 2 == 1)
-                        {
-                            Complex tmp = unit_root(-HINT_2PI * pos / len);
-                            table1[i][pos] = tmp;
-                            table1[i][vec_size - pos] = -Complex(tmp.imag(), tmp.real());
-                        }
+                        throw("FFT length too long for lut\n");
                     }
-                    table1[i][vec_size / 2] = std::conj(unit_root(8, 1));
-                    for (size_t pos = 0; pos < vec_size / 2; pos++)
+                    for (INT_32 i = cur_log_size + 1; i <= shift; i++)
                     {
-                        table3[i][pos * 2] = table3[i - 1][pos];
-                        if (pos % 2 == 1)
+                        size_t len = 1ull << i, vec_size = len * FAC / 4;
+                        table1[i].resize(vec_size);
+                        table3[i].resize(vec_size);
+                        table1[i][0] = table3[i][0] = Complex(1, 0);
+                        for (size_t pos = 0; pos < vec_size / 2; pos++)
                         {
-                            Complex tmp = get_full_omega(i, pos * 3);
-                            table3[i][pos] = tmp;
-                            table3[i][vec_size - pos] = Complex(tmp.imag(), tmp.real());
+                            table1[i][pos * 2] = table1[i - 1][pos];
+                            if (pos % 2 == 1)
+                            {
+                                Complex tmp = unit_root(-HINT_2PI * pos / len);
+                                table1[i][pos] = tmp;
+                                table1[i][vec_size - pos] = -Complex(tmp.imag(), tmp.real());
+                            }
                         }
+                        table1[i][vec_size / 2] = std::conj(unit_root(8, 1));
+                        for (size_t pos = 0; pos < vec_size / 2; pos++)
+                        {
+                            table3[i][pos * 2] = table3[i - 1][pos];
+                            if (pos % 2 == 1)
+                            {
+                                Complex tmp = get_full_omega(i, pos * 3);
+                                table3[i][pos] = tmp;
+                                table3[i][vec_size - pos] = Complex(tmp.imag(), tmp.real());
+                            }
+                        }
+                        table3[i][vec_size / 2] = std::conj(unit_root(8, 3));
                     }
-                    table3[i][vec_size / 2] = std::conj(unit_root(8, 3));
+                    cur_log_size = std::max(cur_log_size, shift);
                 }
-                cur_log_size = std::max(cur_log_size, shift);
-            }
-            // shift表示圆平分为1<<shift份,3n表示第几个单位根
-            Complex get_full_omega(UINT_32 shift, size_t n) const
-            {
-                size_t vec_size = (size_t(1) << shift) / 4;
-                if (n < vec_size)
+                // shift表示圆平分为1<<shift份,3n表示第几个单位根
+                Complex get_full_omega(UINT_32 shift, size_t n) const
                 {
-                    return table1[shift][n];
+                    size_t vec_size = (size_t(1) << shift) / 4;
+                    if (n < vec_size)
+                    {
+                        return table1[shift][n];
+                    }
+                    else if (n > vec_size)
+                    {
+                        Complex tmp = table1[shift][vec_size * 2 - n];
+                        return Complex(-tmp.real(), tmp.imag());
+                    }
+                    else
+                    {
+                        return Complex(0, -1);
+                    }
                 }
-                else if (n > vec_size)
-                {
-                    Complex tmp = table1[shift][vec_size * 2 - n];
-                    return Complex(-tmp.real(), tmp.imag());
-                }
-                else
-                {
-                    return Complex(0, -1);
-                }
-            }
                 // shift表示圆平分为1<<shift份,n表示第几个单位根
                 const Complex &get_omega(UINT_32 shift, size_t n) const
                 {
@@ -998,9 +998,10 @@ namespace hint
             // 求共轭复数及归一化，逆变换用
             inline void fft_conj(Complex *input, size_t fft_len, HintFloat div = 1)
             {
+                div = 1.0 / div;
                 for (size_t i = 0; i < fft_len; i++)
                 {
-                    input[i] = std::conj(input[i]) / div;
+                    input[i] = std::conj(input[i]) * div;
                 }
             }
             // 归一化,逆变换用

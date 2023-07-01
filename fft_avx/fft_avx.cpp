@@ -754,9 +754,10 @@ namespace hint
         // 求共轭复数及归一化，逆变换用
         inline void fft_conj(Complex *input, size_t fft_len, HintFloat div = 1)
         {
+            div = 1.0 / div;
             for (size_t i = 0; i < fft_len; i++)
             {
-                input[i] = std::conj(input[i]) / div;
+                input[i] = std::conj(input[i]) * div;
             }
         }
         // 归一化,逆变换用
