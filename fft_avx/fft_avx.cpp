@@ -13,6 +13,9 @@ using namespace hint_simd;
 #define MULTITHREAD 0   // 多线程 0 means no, 1 means yes
 #define TABLE_PRELOAD 0 // 是否提前初始化表 0 means no, 1 means yes
 
+#if MULTITHREAD == 1
+#define TABLE_ENABLE 1
+#endif
 namespace hint
 {
     using UINT_8 = uint8_t;
@@ -129,7 +132,16 @@ namespace hint
     inline void com_ary_combine_copy(Complex *target, const T &source1, size_t len1, const T &source2, size_t len2)
     {
         size_t min_len = std::min(len1, len2);
+        size_t mod4_len = min_len / 4 * 4;
         size_t i = 0;
+        while (i < mod4_len)
+        {
+            target[i] = Complex(source1[i], source2[i]);
+            target[i + 1] = Complex(source1[i + 1], source2[i + 1]);
+            target[i + 2] = Complex(source1[i + 2], source2[i + 2]);
+            target[i + 3] = Complex(source1[i + 3], source2[i + 3]);
+            i += 4;
+        }
         while (i < min_len)
         {
             target[i] = Complex(source1[i], source2[i]);
@@ -625,6 +637,22 @@ namespace hint
             _mm256_storeu_pd(reinterpret_cast<double *>(input + 6), tmp7);
         }
 
+        // fft基2时间抽取蝶形变换
+        inline void fft_radix2_dit_butterfly(Complex omega, Complex *input, size_t rank)
+        {
+            Complex tmp0 = input[0];
+            Complex tmp1 = input[rank] * omega;
+            input[0] = tmp0 + tmp1;
+            input[rank] = tmp0 - tmp1;
+        }
+        // fft基2频率抽取蝶形变换
+        inline void fft_radix2_dif_butterfly(Complex omega, Complex *input, size_t rank)
+        {
+            Complex tmp0 = input[0];
+            Complex tmp1 = input[rank];
+            input[0] = tmp0 + tmp1;
+            input[rank] = (tmp0 - tmp1) * omega;
+        }
         // fft分裂基时间抽取蝶形变换
         inline void fft_split_radix_dit_butterfly(Complex omega, Complex omega_cube,
                                                   Complex *input, size_t rank)
@@ -794,19 +822,42 @@ namespace hint
                 fft_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
             }
 #else
+            // static const Complex unit1 = std::conj(unit_root(LEN, 1));
+            // static const Complex unit3 = std::conj(unit_root(LEN, 3));
+            // static const Complex unit2 = std::conj(unit_root(LEN, 2));
+            // static const Complex unit6 = std::conj(unit_root(LEN, 6));
+            // static const Complex2 unit(unit2, unit2);
+            // static const Complex2 unit_cube(unit6, unit6);
+            // Complex2 omega(Complex(1, 0), unit1);
+            // Complex2 omega_cube(Complex(1, 0), unit3);
+            // for (size_t i = 0; i < quarter_len; i += 2)
+            // {
+            //     fft_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
+            //     omega = omega * unit;
+            //     omega_cube = omega_cube * unit_cube;
+            // }
             static const Complex unit1 = std::conj(unit_root(LEN, 1));
-            static const Complex unit3 = std::conj(unit_root(LEN, 3));
             static const Complex unit2 = std::conj(unit_root(LEN, 2));
+            static const Complex unit3 = std::conj(unit_root(LEN, 3));
             static const Complex unit6 = std::conj(unit_root(LEN, 6));
-            static const Complex2 unit(unit2, unit2);
-            static const Complex2 unit_cube(unit6, unit6);
-            Complex2 omega(Complex(1, 0), unit1);
-            Complex2 omega_cube(Complex(1, 0), unit3);
-            for (size_t i = 0; i < quarter_len; i += 2)
+            static const Complex unit9 = std::conj(unit_root(LEN, 9));
+            static const Complex unit4 = std::conj(unit_root(LEN, 4));
+            static const Complex unit12 = std::conj(unit_root(LEN, 12));
+
+            static const Complex2 unit(unit4, unit4);
+            static const Complex2 unit_cube(unit12, unit12);
+            Complex2 omega1(Complex(1, 0), unit1);
+            Complex2 omega2(unit2, unit3);
+            Complex2 omega_cube1(Complex(1, 0), unit3);
+            Complex2 omega_cube2(unit6, unit9);
+            for (size_t i = 0; i < quarter_len; i += 4)
             {
-                fft_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
-                omega = omega * unit;
-                omega_cube = omega_cube * unit_cube;
+                fft_split_radix_dit_butterfly(omega1, omega_cube1, input + i, quarter_len);
+                fft_split_radix_dit_butterfly(omega2, omega_cube2, input + i + 2, quarter_len);
+                omega1 = omega1 * unit;
+                omega2 = omega2 * unit;
+                omega_cube1 = omega_cube1 * unit_cube;
+                omega_cube2 = omega_cube2 * unit_cube;
             }
 #endif
         }
@@ -853,19 +904,42 @@ namespace hint
                 fft_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
             }
 #else
+            // static const Complex unit1 = std::conj(unit_root(LEN, 1));
+            // static const Complex unit3 = std::conj(unit_root(LEN, 3));
+            // static const Complex unit2 = std::conj(unit_root(LEN, 2));
+            // static const Complex unit6 = std::conj(unit_root(LEN, 6));
+            // static const Complex2 unit(unit2, unit2);
+            // static const Complex2 unit_cube(unit6, unit6);
+            // Complex2 omega(Complex(1, 0), unit1);
+            // Complex2 omega_cube(Complex(1, 0), unit3);
+            // for (size_t i = 0; i < quarter_len; i += 2)
+            // {
+            //     fft_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
+            //     omega = omega * unit;
+            //     omega_cube = omega_cube * unit_cube;
+            // }
             static const Complex unit1 = std::conj(unit_root(LEN, 1));
-            static const Complex unit3 = std::conj(unit_root(LEN, 3));
             static const Complex unit2 = std::conj(unit_root(LEN, 2));
+            static const Complex unit3 = std::conj(unit_root(LEN, 3));
             static const Complex unit6 = std::conj(unit_root(LEN, 6));
-            static const Complex2 unit(unit2, unit2);
-            static const Complex2 unit_cube(unit6, unit6);
-            Complex2 omega(Complex(1, 0), unit1);
-            Complex2 omega_cube(Complex(1, 0), unit3);
-            for (size_t i = 0; i < quarter_len; i += 2)
+            static const Complex unit9 = std::conj(unit_root(LEN, 9));
+            static const Complex unit4 = std::conj(unit_root(LEN, 4));
+            static const Complex unit12 = std::conj(unit_root(LEN, 12));
+
+            static const Complex2 unit(unit4, unit4);
+            static const Complex2 unit_cube(unit12, unit12);
+            Complex2 omega1(Complex(1, 0), unit1);
+            Complex2 omega2(unit2, unit3);
+            Complex2 omega_cube1(Complex(1, 0), unit3);
+            Complex2 omega_cube2(unit6, unit9);
+            for (size_t i = 0; i < quarter_len; i += 4)
             {
-                fft_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
-                omega = omega * unit;
-                omega_cube = omega_cube * unit_cube;
+                fft_split_radix_dif_butterfly(omega1, omega_cube1, input + i, quarter_len);
+                fft_split_radix_dif_butterfly(omega2, omega_cube2, input + i + 2, quarter_len);
+                omega1 = omega1 * unit;
+                omega2 = omega2 * unit;
+                omega_cube1 = omega_cube1 * unit_cube;
+                omega_cube2 = omega_cube2 * unit_cube;
             }
 #endif
             fft_split_radix_dif_template<half_len>(input);
@@ -1119,10 +1193,48 @@ namespace hint
 #endif
     }
 }
+
 using namespace std;
 using namespace hint;
 using namespace hint_transform;
 
+inline void complex_img_toi32(Complex *ptr, uint32_t *res_ptr, size_t len)
+{
+    // static const Complex2 adder{Complex(0.5, 0.5), Complex(0.5, 0.5)};
+    // Complex2 c0 = Complex2(ptr);
+    // Complex2 c1 = Complex2(ptr + 2);
+    // Complex2 c2 = Complex2(ptr + 4);
+    // Complex2 c3 = Complex2(ptr + 6);
+    // c0 = c0.element_permute64<0b1101>();
+    // c1 = c1.element_permute64<0b11010000>();
+    // c2 = c2.element_permute64<0b1101>();
+    // c3 = c3.element_permute64<0b11010000>();
+    // c0 = adder + _mm256_blend_pd(c0.data, c1.data, 0b1100);
+    // c2 = adder + _mm256_blend_pd(c2.data, c3.data, 0b1100);
+    // auto i0 = _mm256_cvttpd_epi32(c0.data);
+    // auto i1 = _mm256_cvttpd_epi32(c2.data);
+    // *reinterpret_cast<__m128i *>(res_ptr) = i0;
+    // *reinterpret_cast<__m128i *>(res_ptr + 4) = i1;
+    static const Complex2 magic = 0.5;
+    static const Complex2 invx4(double(-0.5 / len));
+    Complex2 c0 = Complex2(ptr);
+    Complex2 c1 = Complex2(ptr + 2);
+    Complex2 c2 = Complex2(ptr + 4);
+    Complex2 c3 = Complex2(ptr + 6);
+    c0 = _mm256_shuffle_pd(c0.data, c1.data, 0b1111);
+    c2 = _mm256_shuffle_pd(c2.data, c3.data, 0b1111);
+    c0 = c0.element_permute64<0b11011000>().linear_mul(invx4) + magic;
+    c2 = c2.element_permute64<0b11011000>().linear_mul(invx4) + magic;
+    auto i0 = _mm256_cvttpd_epi32(c0.data);
+    auto i1 = _mm256_cvttpd_epi32(c2.data);
+    *reinterpret_cast<__m128i *>(res_ptr) = i0;
+    *reinterpret_cast<__m128i *>(res_ptr + 4) = i1;
+}
+inline uint32_t f_toint(double x)
+{
+    x += 6755399441055744.5;
+    return *(uint32_t *)&x;
+}
 template <typename T>
 vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 {
@@ -1137,14 +1249,14 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 #else
     fft_dif(fft_ary, fft_len, false); // 优化FFT
 #endif
-    double inv = -0.5 / fft_len;
-    Complex2 invx4(inv);
+    // static const double inv = -0.5 / fft_len;
+    // static const Complex2 invx4(inv);
     for (size_t i = 0; i < fft_len; i += 2)
     {
         // Complex tmp = fft_ary[i];
         // fft_ary[i] = std::conj(tmp * tmp) * inv;
         Complex2 tmp = fft_ary + i;
-        tmp = tmp * tmp.linear_mul(invx4);
+        tmp = tmp.square();
         (tmp.conj()).store(fft_ary + i);
     }
     // fft_radix2_dit_lut(fft_ary, fft_len, false); // 经典FFT
@@ -1153,9 +1265,23 @@ vector<T> poly_multiply(const vector<T> &in1, const vector<T> &in2)
 #else
     fft_dit(fft_ary, fft_len, false); // 优化FFT
 #endif
-    for (size_t i = 0; i < out_len; i++)
+    size_t mod8_len = out_len / 8 * 8;
+    auto res_ptr = result.data();
+    for (size_t i = 0; i < mod8_len; i += 8)
     {
-        result[i] = static_cast<T>(fft_ary[i].imag() + 0.5);
+        complex_img_toi32(fft_ary + i, res_ptr + i, fft_len);
+        // res_ptr[i] = f_toint(fft_ary[i].imag());
+        // res_ptr[i + 1] = f_toint(fft_ary[i + 1].imag());
+        // res_ptr[i + 2] = f_toint(fft_ary[i + 2].imag());
+        // res_ptr[i + 3] = f_toint(fft_ary[i + 3].imag());
+        // res_ptr[i + 4] = f_toint(fft_ary[i + 4].imag());
+        // res_ptr[i + 5] = f_toint(fft_ary[i + 5].imag());
+        // res_ptr[i + 6] = f_toint(fft_ary[i + 6].imag());
+        // res_ptr[i + 7] = f_toint(fft_ary[i + 7].imag());
+    }
+    for (size_t i = mod8_len; i < out_len; i++)
+    {
+        result[i] = T(fft_ary[i].imag() + 0.5);
     }
     delete[] fft_ary;
     return result;

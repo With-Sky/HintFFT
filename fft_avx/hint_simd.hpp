@@ -174,6 +174,14 @@ namespace hint_simd
         {
             return _mm256_mul_pd(data, input.data);
         }
+        Complex2 square() const
+        {
+            const __m256d rr = all_real().data;
+            const __m256d ir = swap().data;
+            const __m256d add = _mm256_add_pd(rr, ir);
+            const __m256d sub = _mm256_sub_pd(rr, ir);
+            return _mm256_mul_pd(add, _mm256_blend_pd(sub, data, 0b1010));
+        }
         Complex2 operator+(Complex2 input) const
         {
             return _mm256_add_pd(data, input.data);
