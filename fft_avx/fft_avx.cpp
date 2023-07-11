@@ -9,9 +9,9 @@
 #include "stopwatch.hpp"
 using namespace hint_simd;
 
-#define TABLE_ENABLE 0  // 是否使用查找表
+#define TABLE_ENABLE 1  // 是否使用查找表
 #define MULTITHREAD 0   // 多线程 0 means no, 1 means yes
-#define TABLE_PRELOAD 0 // 是否提前初始化表 0 means no, 1 means yes
+#define TABLE_PRELOAD 1 // 是否提前初始化表 0 means no, 1 means yes
 
 #if MULTITHREAD == 1
 #define TABLE_ENABLE 1
@@ -213,7 +213,7 @@ namespace hint
                 table1[0] = table1[1] = table3[0] = table3[1] = std::vector<Complex>{1};
                 table1[2] = table3[2] = std::vector<Complex>{1};
 #if TABLE_PRELOAD == 1
-                expand(max_shift);
+                expand_topdown(max_shift);
 #endif
             }
             void expand(INT_32 shift)
@@ -254,8 +254,45 @@ namespace hint
                 }
                 cur_log_size = std::max(cur_log_size, shift);
             }
+            void expand_topdown(INT_32 shift)
+            {
+                shift = std::min(shift, max_log_size);
+                if (shift <= cur_log_size)
+                {
+                    return;
+                }
+                size_t len = 1ull << shift, vec_size = len * FAC / 4;
+                table1[shift].resize(vec_size);
+                table3[shift].resize(vec_size);
+                table1[shift][0] = table3[shift][0] = Complex(1, 0);
+                for (size_t pos = 1; pos < vec_size / 2; pos++)
+                {
+                    Complex tmp = unit_root(-HINT_2PI * pos / len);
+                    table1[shift][pos] = tmp;
+                    table1[shift][vec_size - pos] = -Complex(tmp.imag(), tmp.real());
+                }
+                for (size_t pos = 1; pos < vec_size / 2; pos++)
+                {
+                    Complex tmp = get_omega(shift, pos * 3);
+                    table3[shift][pos] = tmp;
+                    table3[shift][vec_size - pos] = Complex(tmp.imag(), tmp.real());
+                }
+                table1[shift][vec_size / 2] = std::conj(unit_root(8, 1));
+                table3[shift][vec_size / 2] = std::conj(unit_root(8, 3));
+                for (INT_32 log = shift - 1; log > cur_log_size; log--)
+                {
+                    len = 1ull << log, vec_size = len / 4;
+                    table1[log].resize(vec_size);
+                    table3[log].resize(vec_size);
+                    for (size_t pos = 0; pos < vec_size; pos++)
+                    {
+                        table1[log][pos] = table1[log + 1][pos * 2];
+                        table3[log][pos] = table3[log + 1][pos * 2];
+                    }
+                }
+                cur_log_size = std::max(cur_log_size, shift);
+            }
             // 返回单位圆上辐角为theta的点
-
             static Complex unit_root(double theta)
             {
                 return std::polar<double>(1.0, theta);
@@ -309,10 +346,14 @@ namespace hint
                 return table3[shift].data() + n;
             }
         };
-        template <size_t TABLE_LEN>
+        template <UINT_32 MAX_SHIFT>
         class ComplexTableC
         {
         private:
+            enum
+            {
+                TABLE_LEN = (size_t(1) << MAX_SHIFT) / 2
+            };
             std::array<Complex, TABLE_LEN> table1;
             std::array<Complex, TABLE_LEN> table3;
             INT_32 max_log_size = 2;
@@ -325,12 +366,19 @@ namespace hint
 
         public:
             // 初始化可以生成平分圆1<<shift份产生的单位根的表
-            constexpr ComplexTableC(UINT_32 max_shift)
+            constexpr ComplexTableC()
             {
-                max_shift = std::max<size_t>(max_shift, 1);
-                max_log_size = max_shift;
+                max_log_size = std::max<size_t>(MAX_SHIFT, 1);
                 table1[0] = table1[1] = table3[0] = table3[1] = Complex(1);
-                expand(max_shift);
+                expand_topdown(max_log_size);
+            }
+            constexpr Complex &table1_access(int shift, size_t n)
+            {
+                return table1[(1 << shift) / 4 + n];
+            }
+            constexpr Complex &table3_access(int shift, size_t n)
+            {
+                return table3[(1 << shift) / 4 + n];
             }
             constexpr void expand(INT_32 shift)
             {
@@ -342,34 +390,67 @@ namespace hint
                 for (INT_32 i = cur_log_size + 1; i <= shift; i++)
                 {
                     size_t len = 1ull << i, vec_size = len * FAC / 4;
-                    table1[vec_size] = table3[vec_size] = Complex(1, 0);
+                    table1_access(i, 0) = table3_access(i, 0) = Complex(1, 0);
                     for (size_t pos = 0; pos < vec_size / 2; pos++)
                     {
-                        table1[vec_size + pos * 2] = table1[vec_size / 2 + pos];
+                        table1_access(i, pos * 2) = table1_access(i - 1, pos);
                         if (pos % 2 == 1)
                         {
                             Complex tmp = unit_root(-HINT_2PI * pos / len);
-                            table1[vec_size + pos] = tmp;
-                            table1[vec_size + vec_size - pos] = -Complex{tmp.imag(), tmp.real()};
+                            table1_access(i, pos) = tmp;
+                            table1_access(i, vec_size - pos) = -Complex(tmp.imag(), tmp.real());
                         }
                     }
-                    table1[vec_size + vec_size / 2] = std::conj(unit_root(8, 1));
+                    table1_access(i, vec_size / 2) = std::conj(unit_root(8, 1));
                     for (size_t pos = 0; pos < vec_size / 2; pos++)
                     {
-                        table3[vec_size + pos * 2] = table3[vec_size / 2 + pos];
+                        table3_access(i, pos * 2) = table3_access(i - 1, pos);
                         if (pos % 2 == 1)
                         {
                             Complex tmp = get_omega(i, pos * 3);
-                            table3[vec_size + pos] = tmp;
-                            table3[vec_size + vec_size - pos] = Complex{tmp.imag(), tmp.real()};
+                            table3_access(i, pos) = tmp;
+                            table3_access(i, vec_size - pos) = Complex(tmp.imag(), tmp.real());
                         }
                     }
-                    table3[vec_size + vec_size / 2] = std::conj(unit_root(8, 3));
+                    table3_access(i, vec_size / 2) = std::conj(unit_root(8, 3));
+                }
+                cur_log_size = std::max(cur_log_size, shift);
+            }
+            constexpr void expand_topdown(INT_32 shift)
+            {
+                shift = std::min(shift, max_log_size);
+                if (shift <= cur_log_size)
+                {
+                    return;
+                }
+                size_t len = 1ull << shift, vec_size = len * FAC / 4;
+                table1_access(shift, 0) = table3_access(shift, 0) = Complex(1, 0);
+                for (size_t pos = 1; pos < vec_size / 2; pos++)
+                {
+                    Complex tmp = unit_root(-HINT_2PI * pos / len);
+                    table1_access(shift, pos) = tmp;
+                    table1_access(shift, vec_size - pos) = -Complex(tmp.imag(), tmp.real());
+                }
+                for (size_t pos = 1; pos < vec_size / 2; pos++)
+                {
+                    Complex tmp = get_omega(shift, pos * 3);
+                    table3_access(shift, pos) = tmp;
+                    table3_access(shift, vec_size - pos) = Complex(tmp.imag(), tmp.real());
+                }
+                table1_access(shift, vec_size / 2) = std::conj(unit_root(8, 1));
+                table3_access(shift, vec_size / 2) = std::conj(unit_root(8, 3));
+                for (INT_32 log = shift - 1; log > cur_log_size; log--)
+                {
+                    len = 1ull << log, vec_size = len / 4;
+                    for (size_t pos = 0; pos < vec_size; pos++)
+                    {
+                        table1_access(log, pos) = table1_access(log + 1, pos * 2);
+                        table3_access(log, pos) = table3_access(log + 1, pos * 2);
+                    }
                 }
                 cur_log_size = std::max(cur_log_size, shift);
             }
             // 返回单位圆上辐角为theta的点
-
             static constexpr Complex unit_root(double theta)
             {
                 return Complex{std::cos(theta), std::sin(theta)};
@@ -400,7 +481,7 @@ namespace hint
             // shift表示圆平分为1<<shift份,3n表示第几个单位根
             Complex get_omega3(UINT_32 shift, size_t n) const
             {
-                return table3[shift][n];
+                return table3_access(shift, n);
             }
             // shift表示圆平分为1<<shift份,n表示第几个单位根
             Complex2 get_omegaX2(UINT_32 shift, size_t n) const
@@ -424,9 +505,9 @@ namespace hint
             }
         };
 
-        constexpr size_t lut_max_rank = 23;
-        static ComplexTableY TABLE(lut_max_rank);
-        // static constexpr ComplexTableC<1 << (lut_max_rank - 1)> TABLE(lut_max_rank);
+        constexpr size_t lut_max_rank = 19;
+        // static ComplexTableY TABLE(lut_max_rank);
+        static ComplexTableC<lut_max_rank> TABLE;
         // 二进制逆序
         template <typename T>
         void binary_reverse_swap(T &ary, size_t len)
@@ -815,27 +896,16 @@ namespace hint
             fft_split_radix_dit_template<quarter_len>(input + half_len);
             fft_split_radix_dit_template<quarter_len>(input + half_len + quarter_len);
 #if TABLE_ENABLE == 1
-            for (size_t i = 0; i < quarter_len; i += 4)
+            for (size_t i = 0; i < quarter_len; i += 8)
             {
                 auto omega = TABLE.get_omega_ptr(log_len, i);
                 auto omega_cube = TABLE.get_omega3_ptr(log_len, i);
                 fft_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
+                omega = TABLE.get_omega_ptr(log_len, i + 4);
+                omega_cube = TABLE.get_omega3_ptr(log_len, i + 4);
+                fft_split_radix_dit_butterfly(omega, omega_cube, input + i + 4, quarter_len);
             }
 #else
-            // static const Complex unit1 = std::conj(unit_root(LEN, 1));
-            // static const Complex unit3 = std::conj(unit_root(LEN, 3));
-            // static const Complex unit2 = std::conj(unit_root(LEN, 2));
-            // static const Complex unit6 = std::conj(unit_root(LEN, 6));
-            // static const Complex2 unit(unit2, unit2);
-            // static const Complex2 unit_cube(unit6, unit6);
-            // Complex2 omega(Complex(1, 0), unit1);
-            // Complex2 omega_cube(Complex(1, 0), unit3);
-            // for (size_t i = 0; i < quarter_len; i += 2)
-            // {
-            //     fft_split_radix_dit_butterfly(omega, omega_cube, input + i, quarter_len);
-            //     omega = omega * unit;
-            //     omega_cube = omega_cube * unit_cube;
-            // }
             static const Complex unit1 = std::conj(unit_root(LEN, 1));
             static const Complex unit2 = std::conj(unit_root(LEN, 2));
             static const Complex unit3 = std::conj(unit_root(LEN, 3));
@@ -897,27 +967,16 @@ namespace hint
             constexpr size_t log_len = hint_log2(LEN);
             constexpr size_t half_len = LEN / 2, quarter_len = LEN / 4;
 #if TABLE_ENABLE == 1
-            for (size_t i = 0; i < quarter_len; i += 4)
+            for (size_t i = 0; i < quarter_len; i += 8)
             {
                 auto omega = TABLE.get_omega_ptr(log_len, i);
                 auto omega_cube = TABLE.get_omega3_ptr(log_len, i);
                 fft_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
+                omega = TABLE.get_omega_ptr(log_len, i + 4);
+                omega_cube = TABLE.get_omega3_ptr(log_len, i + 4);
+                fft_split_radix_dif_butterfly(omega, omega_cube, input + i + 4, quarter_len);
             }
 #else
-            // static const Complex unit1 = std::conj(unit_root(LEN, 1));
-            // static const Complex unit3 = std::conj(unit_root(LEN, 3));
-            // static const Complex unit2 = std::conj(unit_root(LEN, 2));
-            // static const Complex unit6 = std::conj(unit_root(LEN, 6));
-            // static const Complex2 unit(unit2, unit2);
-            // static const Complex2 unit_cube(unit6, unit6);
-            // Complex2 omega(Complex(1, 0), unit1);
-            // Complex2 omega_cube(Complex(1, 0), unit3);
-            // for (size_t i = 0; i < quarter_len; i += 2)
-            // {
-            //     fft_split_radix_dif_butterfly(omega, omega_cube, input + i, quarter_len);
-            //     omega = omega * unit;
-            //     omega_cube = omega_cube * unit_cube;
-            // }
             static const Complex unit1 = std::conj(unit_root(LEN, 1));
             static const Complex unit2 = std::conj(unit_root(LEN, 2));
             static const Complex unit3 = std::conj(unit_root(LEN, 3));
@@ -985,9 +1044,7 @@ namespace hint
                 fft_split_radix_dit_template_alt<LEN / 2>(input, fft_len);
                 return;
             }
-#ifndef TABLE_PRELOAD
-            TABLE.expand(hint_log2(LEN));
-#endif
+            // TABLE.expand(hint_log2(LEN));
             fft_split_radix_dit_template<LEN>(input);
         }
         template <>
@@ -1002,9 +1059,7 @@ namespace hint
                 fft_split_radix_dif_template_alt<LEN / 2>(input, fft_len);
                 return;
             }
-#ifndef TABLE_PRELOAD
-            TABLE.expand(hint_log2(LEN));
-#endif
+            // TABLE.expand(hint_log2(LEN));
             fft_split_radix_dif_template<LEN>(input);
         }
         template <>
@@ -1021,7 +1076,7 @@ namespace hint
         {
             fft_len = max_2pow(fft_len);
 #if TABLE_ENABLE == 1
-            TABLE.expand(hint_log2(fft_len));
+            // TABLE.expand(hint_log2(fft_len));
 #endif
             if (bit_rev)
             {
@@ -1038,7 +1093,7 @@ namespace hint
         {
             fft_len = max_2pow(fft_len);
 #if TABLE_ENABLE == 1
-            TABLE.expand(hint_log2(fft_len));
+            // TABLE.expand(hint_log2(fft_len));
 #endif
             fft_split_radix_dif(input, fft_len);
             if (bit_rev)
