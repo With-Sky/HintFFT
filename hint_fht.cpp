@@ -45,6 +45,7 @@ namespace hint
         return n + 1;
     }
 
+    //求整数的对数
     template <typename T>
     constexpr int hint_log2(T n)
     {
@@ -68,57 +69,6 @@ namespace hint
     // FFT与类FFT变换的命名空间
     namespace hint_transform
     {
-        // 二进制逆序
-        template <typename It>
-        void binary_reverse_swap(It begin, It end)
-        {
-            const size_t len = end - begin;
-            // 左下标小于右下标时交换,防止重复交换
-            auto smaller_swap = [=](It it_left, It it_right)
-            {
-                if (it_left < it_right)
-                {
-                    std::swap(it_left[0], it_right[0]);
-                }
-            };
-            // 若i的逆序数的迭代器为last,则返回i+1的逆序数的迭代器
-            auto get_next_bitrev = [=](It last)
-            {
-                size_t k = len / 2, indx = last - begin;
-                indx ^= k;
-                while (k > indx)
-                {
-                    k >>= 1;
-                    indx ^= k;
-                };
-                return begin + indx;
-            };
-            // 长度较短的普通逆序
-            if (len <= 16)
-            {
-                for (auto i = begin + 1, j = begin + len / 2; i < end - 1; i++)
-                {
-                    smaller_swap(i, j);
-                    j = get_next_bitrev(j);
-                }
-                return;
-            }
-            const size_t len_8 = len / 8;
-            const auto last = begin + len_8;
-            auto i0 = begin + 1, i1 = i0 + len / 2, i2 = i0 + len / 4, i3 = i1 + len / 4;
-            for (auto j = begin + len / 2; i0 < last; i0++, i1++, i2++, i3++)
-            {
-                smaller_swap(i0, j);
-                smaller_swap(i1, j + 1);
-                smaller_swap(i2, j + 2);
-                smaller_swap(i3, j + 3);
-                smaller_swap(i0 + len_8, j + 4);
-                smaller_swap(i1 + len_8, j + 5);
-                smaller_swap(i2 + len_8, j + 6);
-                smaller_swap(i3 + len_8, j + 7);
-                j = get_next_bitrev(j);
-            }
-        }
         template <typename T>
         inline void transform_2point(T &sum, T &diff)
         {
@@ -249,8 +199,6 @@ namespace hint
                 static void dit(FloatIt in_out) {}
                 template <typename FloatIt>
                 static void dif(FloatIt in_out) {}
-                template <typename FloatIt>
-                static void dif2(FloatIt in_out0, FloatIt in_out1) {}
             };
 
             template <typename FloatTy>
@@ -260,8 +208,6 @@ namespace hint
                 static void dit(FloatIt in_out) {}
                 template <typename FloatIt>
                 static void dif(FloatIt in_out) {}
-                template <typename FloatIt>
-                static void dif2(FloatIt in_out0, FloatIt in_out1) {}
             };
 
             template <typename FloatTy>
@@ -276,12 +222,6 @@ namespace hint
                 static void dif(FloatIt in_out)
                 {
                     transform_2point(in_out[0], in_out[1]);
-                }
-                template <typename FloatIt>
-                static void dif2(FloatIt in_out0, FloatIt in_out1)
-                {
-                    dif(in_out0);
-                    dif(in_out1);
                 }
             };
 
@@ -311,12 +251,6 @@ namespace hint
                     in_out[1] = temp0 - temp1;
                     in_out[2] = temp2 + temp3;
                     in_out[3] = temp2 - temp3;
-                }
-                template <typename FloatIt>
-                static void dif2(FloatIt in_out0, FloatIt in_out1)
-                {
-                    dif(in_out0);
-                    dif(in_out1);
                 }
             };
 
@@ -377,12 +311,6 @@ namespace hint
                     in_out[5] = temp4 - temp0;
                     in_out[6] = temp6 + temp2;
                     in_out[7] = temp6 - temp2;
-                }
-                template <typename FloatIt>
-                static void dif2(FloatIt in_out0, FloatIt in_out1)
-                {
-                    dif(in_out0);
-                    dif(in_out1);
                 }
             };
 
