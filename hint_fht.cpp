@@ -5,6 +5,7 @@
 #include <chrono>
 #include <string>
 #include <bitset>
+#include <type_traits>
 #include <cstdint>
 #include <cfloat>
 #include <cmath>
@@ -66,7 +67,7 @@ namespace hint
         return l;
     }
 
-    // FFT与类FFT变换的命名空间
+    // fft与类fft变换的命名空间
     namespace hint_transform
     {
         template <typename T>
@@ -141,6 +142,7 @@ namespace hint
                 template <typename FloatIt>
                 static void dit(FloatIt in_out)
                 {
+                    static_assert(std::is_same<typename std::iterator_traits<FloatIt>::value_type, FloatTy>::value, "Must be same as the FHT template float type");
                     HalfFHT::dit(in_out);
                     HalfFHT::dit(in_out + half_len);
 
@@ -166,6 +168,7 @@ namespace hint
                 template <typename FloatIt>
                 static void dif(FloatIt in_out)
                 {
+                    static_assert(std::is_same<typename std::iterator_traits<FloatIt>::value_type, FloatTy>::value, "Must be same as the FHT template float type");
                     transform_2point(in_out[0], in_out[half_len]);
                     transform_2point(in_out[quater_len], in_out[half_len + quater_len]);
 
@@ -316,31 +319,31 @@ namespace hint
 
             // 辅助选择函数
             template <size_t LEN = 1>
-            void fht_dit_template_alt(Float64 *input, size_t fft_len)
+            void fht_dit_template_alt(Float64 *input, size_t fht_len)
             {
-                if (fft_len < LEN)
+                if (fht_len < LEN)
                 {
-                    fht_dit_template_alt<LEN / 2>(input, fft_len);
+                    fht_dit_template_alt<LEN / 2>(input, fht_len);
                     return;
                 }
                 FHT<LEN, Float64>::dit(input);
             }
             template <>
-            void fht_dit_template_alt<0>(Float64 *input, size_t fft_len) {}
+            void fht_dit_template_alt<0>(Float64 *input, size_t fht_len) {}
 
             // 辅助选择函数
             template <size_t LEN = 1>
-            void fht_dif_template_alt(Float64 *input, size_t fft_len)
+            void fht_dif_template_alt(Float64 *input, size_t fht_len)
             {
-                if (fft_len < LEN)
+                if (fht_len < LEN)
                 {
-                    fht_dif_template_alt<LEN / 2>(input, fft_len);
+                    fht_dif_template_alt<LEN / 2>(input, fht_len);
                     return;
                 }
                 FHT<LEN, Float64>::dif(input);
             }
             template <>
-            void fht_dif_template_alt<0>(Float64 *input, size_t fft_len) {}
+            void fht_dif_template_alt<0>(Float64 *input, size_t fht_len) {}
 
             auto fht_dit = fht_dit_template_alt<FHT_MAX_LEN>;
             auto fht_dif = fht_dif_template_alt<FHT_MAX_LEN>;
