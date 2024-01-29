@@ -1139,19 +1139,15 @@ void result_test(const vector<T> &res, uint64_t ele)
 int main()
 {
     hint::hint_transform::hint_fht::fht_init<double>();
-    // StopWatch w(1000);
     int n = 18;
     cin >> n;
     size_t len = 1 << n; // 变换长度
     uint64_t ele = 5;
     vector<uint32_t> in1(len / 2, ele);
     vector<uint32_t> in2(len / 2, ele); // 计算两个长度为len/2，每个元素为ele的卷积
-    // w.start();
-    auto t1 = chrono::high_resolution_clock::now();
+    auto t1 = chrono::steady_clock::now();
     vector<uint32_t> res = poly_multiply(in1, in2);
-    // w.stop();
-    auto t2 = chrono::high_resolution_clock::now();
+    auto t2 = chrono::steady_clock::now();
     result_test<uint32_t>(res, ele); // 结果校验
-    // cout << w.duration() << "ms\n";
     cout << chrono::duration_cast<chrono::microseconds>(t2 - t1).count() << "us\n";
 }
