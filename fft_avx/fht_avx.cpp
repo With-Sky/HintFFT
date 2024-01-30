@@ -319,23 +319,23 @@ namespace hint_simd
         }
         void load(double const *ptr)
         {
-            data0 = _mm256_load_pd(ptr);
-            data1 = _mm256_load_pd(ptr + 4);
+            data0.load(ptr);
+            data1.load(ptr + 4);
         }
         void loadu(double const *ptr)
         {
-            data0 = _mm256_loadu_pd(ptr);
-            data1 = _mm256_loadu_pd(ptr + 4);
+            data0.loadu(ptr);
+            data1.loadu(ptr + 4);
         }
         void store(double *ptr) const
         {
-            _mm256_store_pd(ptr, data0.data);
-            _mm256_store_pd(ptr + 4, data1.data);
+            data0.store(ptr);
+            data1.store(ptr + 4);
         }
         void storeu(double *ptr) const
         {
-            _mm256_storeu_pd(ptr, data0.data);
-            _mm256_storeu_pd(ptr + 4, data1.data);
+            data0.storeu(ptr);
+            data1.storeu(ptr + 4);
         }
         void print() const
         {
@@ -420,17 +420,17 @@ namespace hint
     constexpr T all_one(int bits)
     {
         T tmp = T(1) << (bits - 1);
-        return tmp - 1 + tmp;
+        return tmp - T(1) + tmp;
     }
 
     // 整数log2
     template <typename UintTy>
     constexpr int hint_log2(UintTy n)
     {
-        constexpr int bits = 8 * sizeof(UintTy);
-        constexpr UintTy mask = all_one<UintTy>(bits / 2) << (bits / 2);
+        constexpr int bits_2 = 4 * sizeof(UintTy);
+        constexpr UintTy mask = all_one<UintTy>(bits_2) << bits_2;
         UintTy m = mask;
-        int res = 0, shift = bits / 2;
+        int res = 0, shift = bits_2;
         while (shift > 0)
         {
             if ((n & m))
@@ -529,7 +529,7 @@ namespace hint
             static constexpr size_t table_len = len / len_div;
             static constexpr FloatTy unit = HINT_2PI / len;
             using Ty = FloatTy;
-            using TableTy = hint_simd::AlignAry<Ty, table_len>;
+            using TableTy = std::array<Ty, table_len>;
             CosTableStatic() {}
             CosTableStatic(int factor) { init(factor); }
             void init(int factor)
@@ -544,7 +544,7 @@ namespace hint
             auto get_it(size_t n = 0) const { return &table[n]; }
 
         private:
-            TableTy table;
+            alignas(128) TableTy table;
         };
 
         namespace hint_fht
@@ -581,54 +581,51 @@ namespace hint
                         }
                         has_init = true;
                     }
-                    auto get_it(size_t n = 0) const { return table.get_it(n); }
+                    static auto get_it(size_t n = 0) { return table.get_it(n); }
 
-                    static TableTy table;
+                    alignas(128) static TableTy table;
 
                 private:
                     static bool has_init;
                 };
 
                 template <typename FloatTy, int log_len>
-                typename FHTTableRadix2<FloatTy, log_len>::TableTy
+                alignas(128) typename FHTTableRadix2<FloatTy, log_len>::TableTy
                     FHTTableRadix2<FloatTy, log_len>::table;
                 template <typename FloatTy, int log_len>
                 bool FHTTableRadix2<FloatTy, log_len>::has_init = false;
 
                 template <typename FloatTy>
-                class FHTTableRadix2<FloatTy, 4>
+                class FHTTableRadix2<FloatTy, 5>
                 {
                 public:
-                    using TableTy = CosTableStatic<FloatTy, 4, 4>;
+                    using TableTy = CosTableStatic<FloatTy, 5, 4>;
                     FHTTableRadix2() { init(); }
                     static void init()
                     {
                         table.init(1);
                     }
-                    auto get_it(size_t n = 0) const { return table.get_it(n); }
+                    static auto get_it(size_t n = 0) { return table.get_it(n); }
 
-                    static TableTy table;
+                    alignas(128) static TableTy table;
                 };
                 template <typename FloatTy>
-                typename FHTTableRadix2<FloatTy, 4>::TableTy FHTTableRadix2<FloatTy, 4>::table;
+                alignas(128) typename FHTTableRadix2<FloatTy, 5>::TableTy FHTTableRadix2<FloatTy, 5>::table;
 
                 template <size_t LEN, typename FloatTy>
                 struct FHT
                 {
-                    enum
-                    {
-                        fht_len = LEN,
-                        half_len = LEN / 2,
-                        quarter_len = LEN / 4,
-                        log_len = hint_log2(fht_len)
-                    };
+                    static constexpr size_t fht_len = LEN;
+                    static constexpr size_t half_len = fht_len / 2;
+                    static constexpr size_t quarter_len = fht_len / 4;
+                    static constexpr int log_len = hint_log2(fht_len);
+
                     using HalfFHT = FHT<half_len, FloatTy>;
                     using TableTy = FHTTableRadix2<FloatTy, log_len>;
-                    static TableTy TABLE;
 
                     static void init()
                     {
-                        TABLE.init();
+                        TableTy::init();
                     }
 
                     template <typename FloatIt>
@@ -643,7 +640,7 @@ namespace hint
 
                         auto it0 = in_out + 1, it1 = in_out + half_len - 1;
                         auto it2 = it0 + half_len, it3 = it1 + half_len;
-                        auto cos_it = TABLE.get_it(1), sin_it = TABLE.get_it(TABLE.table.table_len - 1);
+                        auto cos_it = TableTy::get_it(1), sin_it = TableTy::get_it(TableTy::table.table_len - 1);
                         for (; it0 < in_out + 4; ++it0, --it1, ++it2, --it3, cos_it++, sin_it--)
                         {
                             auto c = cos_it[0], s = sin_it[0];
@@ -657,34 +654,32 @@ namespace hint
                             it3[0] = temp1 - temp3; //-
                         }
                         it1 -= 3, it3 -= 3, sin_it -= 3;
-                        // for (; it0 < in_out + 8; it0 += 4, it1 -= 4, it2 += 4, it3 -= 4, cos_it += 4, sin_it -= 4)
                         {
                             DoubleX4 c4, s4, temp0, temp1, temp2, temp3;
-                            c4.load(&cos_it[0]), s4.loadu(&sin_it[0]);
-                            temp0.load(&it2[0]), temp1.loadu(&it3[0]);
-                            temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
-                            // temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
+                            c4.loadu(&cos_it[0]), s4.loadu(&sin_it[0]);
+                            temp0.loadu(&it2[0]), temp1.loadu(&it3[0]);
+                            // temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
+                            temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
                             temp3 = (c4.reverse() * temp1).fmsub(temp0.reverse(), s4);
-                            temp0.load(&it0[0]), temp1.loadu(&it1[0]);
-                            (temp0 + temp2).store(&it0[0]);
+                            temp0.loadu(&it0[0]), temp1.loadu(&it1[0]);
+                            (temp0 + temp2).storeu(&it0[0]);
                             (temp1 + temp3).storeu(&it1[0]);
-                            (temp0 - temp2).store(&it2[0]);
+                            (temp0 - temp2).storeu(&it2[0]);
                             (temp1 - temp3).storeu(&it3[0]);
                         }
-                        // it1 -= 4, it3 -= 4, sin_it -= 4;
                         it0 += 4, it2 += 4, cos_it += 4, it1 -= 8, it3 -= 8, sin_it -= 8;
                         for (; it0 < in_out + quarter_len; it0 += 8, it1 -= 8, it2 += 8, it3 -= 8, cos_it += 8, sin_it -= 8)
                         {
                             DoubleX8 c4, s4, temp0, temp1, temp2, temp3;
-                            c4.load(&cos_it[0]), s4.loadu(&sin_it[0]);
-                            temp0.load(&it2[0]), temp1.loadu(&it3[0]);
-                            temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
-                            // temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
+                            c4.loadu(&cos_it[0]), s4.loadu(&sin_it[0]);
+                            temp0.loadu(&it2[0]), temp1.loadu(&it3[0]);
+                            // temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
+                            temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
                             temp3 = (c4.reverse() * temp1).fmsub(temp0.reverse(), s4);
-                            temp0.load(&it0[0]), temp1.loadu(&it1[0]);
-                            (temp0 + temp2).store(&it0[0]);
+                            temp0.loadu(&it0[0]), temp1.loadu(&it1[0]);
+                            (temp0 + temp2).storeu(&it0[0]);
                             (temp1 + temp3).storeu(&it1[0]);
-                            (temp0 - temp2).store(&it2[0]);
+                            (temp0 - temp2).storeu(&it2[0]);
                             (temp1 - temp3).storeu(&it3[0]);
                         }
                     }
@@ -695,7 +690,7 @@ namespace hint
 
                         auto it0 = in_out + 1, it1 = in_out + half_len - 1;
                         auto it2 = it0 + half_len, it3 = it1 + half_len;
-                        auto cos_it = TABLE.get_it(1), sin_it = TABLE.get_it(TABLE.table.table_len - 1);
+                        auto cos_it = TableTy::get_it(1), sin_it = TableTy::get_it(TableTy::table.table_len - 1);
                         for (; it0 < in_out + 4; ++it0, --it1, ++it2, --it3, cos_it++, sin_it--)
                         {
                             auto c = cos_it[0], s = sin_it[0];   //+,-
@@ -709,37 +704,35 @@ namespace hint
                             it3[0] = temp0 * s - temp1 * c;      //-(+)*- -*-(+)
                         }
                         it1 -= 3, it3 -= 3, sin_it -= 3;
-                        // for (; it0 < in_out + 8; it0 += 4, it1 -= 4, it2 += 4, it3 -= 4, cos_it += 4, sin_it -= 4)
                         {
                             DoubleX4 c4, s4, temp0, temp1, temp2, temp3;
-                            temp0.load(&it0[0]), temp1.loadu(&it1[0]);
-                            temp2.load(&it2[0]), temp3.loadu(&it3[0]);
-                            (temp0 + temp2).store(&it0[0]);
+                            temp0.loadu(&it0[0]), temp1.loadu(&it1[0]);
+                            temp2.loadu(&it2[0]), temp3.loadu(&it3[0]);
+                            (temp0 + temp2).storeu(&it0[0]);
                             (temp1 + temp3).storeu(&it1[0]);
                             temp0 = temp0 - temp2;
                             temp1 = temp1 - temp3;
-                            c4.load(&cos_it[0]), s4.loadu(&sin_it[0]);
-                            temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
-                            // temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
+                            c4.loadu(&cos_it[0]), s4.loadu(&sin_it[0]);
+                            // temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
+                            temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
                             temp3 = (c4.reverse() * temp1).fmsub(temp0.reverse(), s4);
-                            temp2.store(&it2[0]), temp3.storeu(&it3[0]);
+                            temp2.storeu(&it2[0]), temp3.storeu(&it3[0]);
                         }
-                        // it1 -= 4, it3 -= 4, sin_it -= 4;
                         it0 += 4, it2 += 4, cos_it += 4, it1 -= 8, it3 -= 8, sin_it -= 8;
                         for (; it0 < in_out + quarter_len; it0 += 8, it1 -= 8, it2 += 8, it3 -= 8, cos_it += 8, sin_it -= 8)
                         {
                             DoubleX8 c4, s4, temp0, temp1, temp2, temp3;
-                            temp0.load(&it0[0]), temp1.loadu(&it1[0]);
-                            temp2.load(&it2[0]), temp3.loadu(&it3[0]);
-                            (temp0 + temp2).store(&it0[0]);
+                            temp0.loadu(&it0[0]), temp1.loadu(&it1[0]);
+                            temp2.loadu(&it2[0]), temp3.loadu(&it3[0]);
+                            (temp0 + temp2).storeu(&it0[0]);
                             (temp1 + temp3).storeu(&it1[0]);
                             temp0 = temp0 - temp2;
                             temp1 = temp1 - temp3;
-                            c4.load(&cos_it[0]), s4.loadu(&sin_it[0]);
-                            temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
-                            // temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
+                            c4.loadu(&cos_it[0]), s4.loadu(&sin_it[0]);
+                            // temp2 = (temp1 * s4).reverse().fmadd(temp0, c4);
+                            temp2 = (temp0 * c4).fmadd(temp1.reverse(), s4.reverse());
                             temp3 = (c4.reverse() * temp1).fmsub(temp0.reverse(), s4);
-                            temp2.store(&it2[0]), temp3.storeu(&it3[0]);
+                            temp2.storeu(&it2[0]), temp3.storeu(&it3[0]);
                         }
 
                         transform2(in_out[0], in_out[half_len]);
@@ -748,8 +741,6 @@ namespace hint
                         HalfFHT::dif(in_out + half_len);
                     }
                 };
-                template <size_t LEN, typename FloatTy>
-                typename FHT<LEN, FloatTy>::TableTy FHT<LEN, FloatTy>::TABLE;
 
                 template <typename FloatTy>
                 struct FHT<0, FloatTy>
@@ -1139,7 +1130,7 @@ void result_test(const vector<T> &res, uint64_t ele)
 int main()
 {
     hint::hint_transform::hint_fht::fht_init<double>();
-    int n = 18;
+    int n = 10;
     cin >> n;
     size_t len = 1 << n; // 变换长度
     uint64_t ele = 5;
