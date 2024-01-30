@@ -240,7 +240,7 @@ namespace hint
                         }
                         has_init = true;
                     }
-                    auto get_it(size_t n = 0) const { return table.get_it(n); }
+                    static auto get_it(size_t n = 0) { return table.get_it(n); }
 
                     static TableTy table;
 
@@ -264,7 +264,7 @@ namespace hint
                     {
                         table.init(1);
                     }
-                    auto get_it(size_t n = 0) const { return table.get_it(n); }
+                    static auto get_it(size_t n = 0) { return table.get_it(n); }
 
                     static TableTy table;
                 };
@@ -274,19 +274,17 @@ namespace hint
                 template <size_t LEN, typename FloatTy>
                 struct FHT
                 {
-                    enum
-                    {
-                        fht_len = LEN,
-                        half_len = LEN / 2,
-                        quarter_len = LEN / 4,
-                        log_len = hint_log2(fht_len)
-                    };
+                    static constexpr size_t fht_len = LEN;
+                    static constexpr size_t half_len = fht_len / 2;
+                    static constexpr size_t quarter_len = fht_len / 4;
+                    static constexpr int log_len = hint_log2(fht_len);
+
                     using HalfFHT = FHT<half_len, FloatTy>;
                     using TableTy = FHTTableRadix2<FloatTy, log_len>;
-                    static TableTy TABLE;
+                    // static TableTy TABLE;
                     static void init()
                     {
-                        TABLE.init();
+                        TableTy::init();
                     }
                     template <typename FloatIt>
                     static void dit(FloatIt in_out)
@@ -300,7 +298,7 @@ namespace hint
 
                         auto it0 = in_out + 1, it1 = in_out + half_len - 1;
                         auto it2 = it0 + half_len, it3 = it1 + half_len;
-                        auto cos_it = TABLE.get_it(1), sin_it = TABLE.get_it(TABLE.table.table_len - 1);
+                        auto cos_it = TableTy::get_it(1), sin_it = TableTy::get_it(TableTy::table.table_len - 1);
                         for (; it0 < it1; ++it0, --it1, ++it2, --it3, cos_it++, sin_it--)
                         {
                             auto c = cos_it[0], s = sin_it[0];
@@ -321,7 +319,7 @@ namespace hint
 
                         auto it0 = in_out + 1, it1 = in_out + half_len - 1;
                         auto it2 = it0 + half_len, it3 = it1 + half_len;
-                        auto cos_it = TABLE.get_it(1), sin_it = TABLE.get_it(TABLE.table.table_len - 1);
+                        auto cos_it = TableTy::get_it(1), sin_it = TableTy::get_it(TableTy::table.table_len - 1);
                         for (; it0 < it1; ++it0, --it1, ++it2, --it3, cos_it++, sin_it--)
                         {
                             auto c = cos_it[0], s = sin_it[0];
@@ -341,8 +339,6 @@ namespace hint
                         HalfFHT::dif(in_out + half_len);
                     }
                 };
-                template <size_t LEN, typename FloatTy>
-                typename FHT<LEN, FloatTy>::TableTy FHT<LEN, FloatTy>::TABLE; //(FHT<LEN, FloatTy>::log_len, 4, 1);
 
                 template <typename FloatTy>
                 struct FHT<0, FloatTy>
@@ -504,8 +500,8 @@ namespace hint
                         }
                         has_init = true;
                     }
-                    auto get_it1(size_t n = 0) const { return table1.get_it(n); }
-                    auto get_it3(size_t n = 0) const { return table3.get_it(n); }
+                    static auto get_it1(size_t n = 0) { return table1.get_it(n); }
+                    static auto get_it3(size_t n = 0) { return table3.get_it(n); }
 
                     static TableTy table1;
                     static TableTy table3;
@@ -534,8 +530,8 @@ namespace hint
                         table1.init(1);
                         table3.init(3);
                     }
-                    auto get_it1(size_t n = 0) const { return table1.get_it(n); }
-                    auto get_it3(size_t n = 0) const { return table3.get_it(n); }
+                    static auto get_it1(size_t n = 0) { return table1.get_it(n); }
+                    static auto get_it3(size_t n = 0) { return table3.get_it(n); }
 
                     static TableTy table1;
                     static TableTy table3;
@@ -548,21 +544,19 @@ namespace hint
                 template <size_t LEN, typename FloatTy>
                 struct FHT
                 {
-                    enum
-                    {
-                        fht_len = LEN,
-                        half_len = LEN / 2,
-                        quarter_len = LEN / 4,
-                        oct_len = LEN / 8,
-                        log_len = hint_log2(fht_len)
-                    };
+                    static constexpr size_t fht_len = LEN;
+                    static constexpr size_t half_len = fht_len / 2;
+                    static constexpr size_t quarter_len = fht_len / 4;
+                    static constexpr size_t oct_len = fht_len / 8;
+                    static constexpr int log_len = hint_log2(fht_len);
+
                     using HalfFHT = FHT<half_len, FloatTy>;
                     using QuarterFHT = FHT<quarter_len, FloatTy>;
                     using TableTy = FHTTableSplitRadix<FloatTy, log_len>;
-                    static TableTy TABLE;
+                    // static TableTy TABLE;
                     static void init()
                     {
-                        TABLE.init();
+                        TableTy::init();
                     }
                     template <typename FloatIt>
                     static void dit(FloatIt in_out)
@@ -579,7 +573,7 @@ namespace hint
 
                         auto it0 = in_out + 1, it1 = in_out + quarter_len - 1;
                         auto it2 = it0 + quarter_len, it3 = it1 + quarter_len;
-                        auto omega1_it = TABLE.get_it1() + 1, omega3_it = TABLE.get_it3() + 1;
+                        auto omega1_it = TableTy::get_it1() + 1, omega3_it = TableTy::get_it3() + 1;
                         for (; it0 < it1; it0++, it1--, it2++, it3--, omega1_it++, omega3_it++)
                         {
                             auto omega1 = omega1_it[0], omega3 = omega3_it[0];
@@ -618,7 +612,7 @@ namespace hint
                         transform2(in_out[oct_len * 3], in_out[half_len + oct_len * 3]);
                         auto it0 = in_out + 1, it1 = in_out + quarter_len - 1;
                         auto it2 = it0 + quarter_len, it3 = it1 + quarter_len;
-                        auto omega1_it = TABLE.get_it1() + 1, omega3_it = TABLE.get_it3() + 1;
+                        auto omega1_it = TableTy::get_it1() + 1, omega3_it = TableTy::get_it3() + 1;
                         for (; it0 < it1; it0++, it1--, it2++, it3--, omega1_it++, omega3_it++)
                         {
                             auto omega1 = omega1_it[0], omega3 = omega3_it[0];
@@ -650,8 +644,6 @@ namespace hint
                         QuarterFHT::dif(in_out + half_len + quarter_len);
                     }
                 };
-                template <size_t LEN, typename FloatTy>
-                typename FHT<LEN, FloatTy>::TableTy FHT<LEN, FloatTy>::TABLE;
 
                 template <typename FloatTy>
                 struct FHT<0, FloatTy>
