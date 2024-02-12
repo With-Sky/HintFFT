@@ -1,3 +1,4 @@
+// TSKY 2024/2/12
 #include <vector>
 #include <array>
 #include <complex>
@@ -169,7 +170,7 @@ namespace hint
                 allocate();
                 for (size_t i = 0; i < table.size(); i++)
                 {
-                    table[i] = std::cos(factor * i * unit);
+                    table[i] = std::cos(factor * unit * FloatTy(i));
                 }
             }
             const auto &operator[](size_t n) const { return table[n]; }
@@ -197,7 +198,7 @@ namespace hint
                 allocate();
                 for (size_t i = 0; i < table.size(); i++)
                 {
-                    table[i] = unit_root(factor * i * unit);
+                    table[i] = unit_root(factor * unit * FloatTy(i));
                 }
             }
             const auto &operator[](size_t n) const { return table[n]; }
@@ -220,6 +221,7 @@ namespace hint
                     using HalfTable = FHTTableRadix2<FloatTy, log_len - 1>;
                     using TableTy = CosTableDynamic<FloatTy, log_len, 4>;
 
+                    static constexpr int factor = HalfTable::factor;
                     FHTTableRadix2()
                     {
                         // init();
@@ -236,7 +238,7 @@ namespace hint
                         for (size_t i = 0; i < table_len; i += 2)
                         {
                             table[i] = HalfTable::table[i / 2];
-                            table[i + 1] = std::cos((i + 1) * table.unit);
+                            table[i + 1] = std::cos(FloatTy(i + 1) * factor * table.unit);
                         }
                         has_init = true;
                     }
@@ -259,10 +261,11 @@ namespace hint
                 {
                 public:
                     using TableTy = CosTableDynamic<FloatTy, 4, 4>;
+                    static constexpr int factor = 1;
                     FHTTableRadix2() { init(); }
                     static void init()
                     {
-                        table.init(1);
+                        table.init(factor);
                     }
                     static auto get_it(size_t n = 0) { return table.get_it(n); }
 
@@ -477,6 +480,9 @@ namespace hint
                     using HalfTable = FHTTableSplitRadix<FloatTy, log_len - 1>;
                     using TableTy = ComplexTableDynamic<FloatTy, log_len, 8>;
 
+                    static constexpr int factor1 = HalfTable::factor1;
+                    static constexpr int factor3 = HalfTable::factor3;
+
                     FHTTableSplitRadix()
                     {
                         // init();
@@ -495,8 +501,8 @@ namespace hint
                         {
                             table1[i] = HalfTable::table1[i / 2];
                             table3[i] = HalfTable::table3[i / 2];
-                            table1[i + 1] = unit_root((i + 1) * table1.unit);
-                            table3[i + 1] = unit_root((i + 1) * 3 * table3.unit);
+                            table1[i + 1] = unit_root(FloatTy(i + 1) * factor1 * table1.unit);
+                            table3[i + 1] = unit_root(FloatTy(i + 1) * factor3 * table3.unit);
                         }
                         has_init = true;
                     }
@@ -524,11 +530,15 @@ namespace hint
                 {
                 public:
                     using TableTy = ComplexTableDynamic<FloatTy, 5, 8>;
+
+                    static constexpr int factor1 = 1;
+                    static constexpr int factor3 = 3;
+
                     FHTTableSplitRadix() { init(); }
                     static void init()
                     {
-                        table1.init(1);
-                        table3.init(3);
+                        table1.init(factor1);
+                        table3.init(factor3);
                     }
                     static auto get_it1(size_t n = 0) { return table1.get_it(n); }
                     static auto get_it3(size_t n = 0) { return table3.get_it(n); }
@@ -558,6 +568,7 @@ namespace hint
                     {
                         TableTy::init();
                     }
+
                     template <typename FloatIt>
                     static void dit(FloatIt in_out)
                     {
@@ -863,61 +874,67 @@ namespace hint
                 FHTDefault<FHT_MAX_LEN, FloatTy>::init();
             }
 
-            // 辅助选择函数
-            template <size_t LEN = 1>
-            inline void fht_dit_template_alt(Float64 *in_out, size_t fht_len)
+            // 辅助选择类
+            template <size_t LEN, typename FloatTy>
+            struct FHTAlt
             {
-                if (fht_len > LEN)
+                static void dit(FloatTy in_out[], size_t fft_len)
                 {
-                    fht_dit_template_alt<LEN * 2>(in_out, fht_len);
-                    return;
+                    if (fft_len > LEN)
+                    {
+                        FHTAlt<LEN * 2, FloatTy>::dit(in_out, fft_len);
+                        return;
+                    }
+                    FHTDefault<LEN, Float64>::init();
+                    FHTDefault<LEN, Float64>::dit(in_out);
                 }
-                FHTDefault<LEN, Float64>::init();
-                FHTDefault<LEN, Float64>::dit(in_out);
-            }
-            template <>
-            inline void fht_dit_template_alt<FHT_MAX_LEN * 2>(Float64 *in_out, size_t fht_len)
-            {
-                throw("Length of FHT can't be larger than FHT_MAX_LEN");
-            }
-
-            // 辅助选择函数
-            template <size_t LEN = 1>
-            inline void fht_dif_template_alt(Float64 *in_out, size_t fht_len)
-            {
-                if (fht_len > LEN)
+                static void dif(FloatTy in_out[], size_t fft_len)
                 {
-                    fht_dif_template_alt<LEN * 2>(in_out, fht_len);
-                    return;
+                    if (fft_len > LEN)
+                    {
+                        FHTAlt<LEN * 2, FloatTy>::dif(in_out, fft_len);
+                        return;
+                    }
+                    FHTDefault<LEN, Float64>::init();
+                    FHTDefault<LEN, Float64>::dif(in_out);
                 }
-                FHTDefault<LEN, Float64>::init();
-                FHTDefault<LEN, Float64>::dif(in_out);
-            }
-            template <>
-            inline void fht_dif_template_alt<FHT_MAX_LEN * 2>(Float64 *in_out, size_t fht_len)
+            };
+            template <typename FloatTy>
+            struct FHTAlt<FHT_MAX_LEN * 2, FloatTy>
             {
-                throw("Length of FHT can't be larger than FHT_MAX_LEN");
-            }
+                static void dit(FloatTy in_out[], size_t len)
+                {
+                    throw("Length of FHT can't be larger than FHT_MAX_LEN");
+                }
+                static void dif(FloatTy in_out[], size_t len)
+                {
+                    throw("Length of FHT can't be larger than FHT_MAX_LEN");
+                }
+            };
 
             // 时间抽取快速哈特莱变换
-            inline void fht_dit(Float64 *in_out, size_t fht_len)
+            template <typename FloatTy>
+            inline void fht_dit(FloatTy in_out[], size_t fht_len)
             {
-                fht_dit_template_alt<1>(in_out, fht_len);
+                FHTAlt<1, FloatTy>::dit(in_out, fht_len);
             }
             // 频率抽取快速哈特莱变换
-            inline void fht_dif(Float64 *in_out, size_t fht_len)
+            template <typename FloatTy>
+            inline void fht_dif(FloatTy in_out[], size_t fht_len)
             {
-                fht_dif_template_alt<1>(in_out, fht_len);
+                FHTAlt<1, FloatTy>::dif(in_out, fht_len);
             }
 
             // 离散哈特莱变换
-            inline void dht(Float64 *in_out, size_t len)
+            template <typename FloatTy>
+            inline void dht(FloatTy in_out[], size_t len)
             {
                 binary_reverse_swap(in_out, len);
                 fht_dit(in_out, len);
             }
             // 离散哈特莱逆变换
-            inline void idht(Float64 *in_out, size_t len)
+            template <typename FloatTy>
+            inline void idht(FloatTy in_out[], size_t len)
             {
                 dht(in_out, len);
                 Float64 inv = Float64(1) / len;
@@ -928,7 +945,8 @@ namespace hint
             }
 
             // FHT加速卷积
-            inline void fht_convolution(Float64 fht_ary1[], Float64 fht_ary2[], Float64 out[], size_t fht_len)
+            template <typename FloatTy>
+            inline void fht_convolution(FloatTy fht_ary1[], FloatTy fht_ary2[], FloatTy out[], size_t fht_len)
             {
                 if (fht_len == 0)
                 {
@@ -950,7 +968,7 @@ namespace hint
                 {
                     fht_dif(fht_ary2, fht_len);
                 }
-                const double inv = 0.5 / fht_len;
+                const FloatTy inv = 0.5 / fht_len;
                 out[0] = fht_ary1[0] * fht_ary2[0] / fht_len;
                 out[1] = fht_ary1[1] * fht_ary2[1] / fht_len;
                 if (fht_len == 2)
