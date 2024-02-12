@@ -1,3 +1,4 @@
+// TSKY 2024/2/12
 #include <vector>
 #include <array>
 #include <complex>
@@ -12,8 +13,6 @@
 #include <ctime>
 #include <cstring>
 #include <tuple>
-#include <iostream>
-#include <complex>
 #include <immintrin.h>
 #ifndef HINT_SIMD_HPP
 #define HINT_SIMD_HPP
@@ -26,7 +25,7 @@ namespace hint_simd
     class AlignAry
     {
     private:
-        alignas(128) T ary[LEN];
+        alignas(4096) T ary[LEN];
 
     public:
         constexpr AlignAry() {}
@@ -86,12 +85,12 @@ namespace hint_simd
         // 从连续的数组构造
         DoubleX4(double const *ptr)
         {
-            load(ptr);
+            loadu(ptr);
         }
         // 用4个数构造
-        DoubleX4(double a7, double a6, double a5, double a4)
+        DoubleX4(double a3, double a2, double a1, double a0)
         {
-            data = _mm256_set_pd(a7, a6, a5, a4);
+            data = _mm256_set_pd(a3, a2, a1, a0);
         }
         void clr()
         {
@@ -145,6 +144,14 @@ namespace hint_simd
         DoubleX4 fmsub(DoubleX4 mul1, DoubleX4 mul2) const
         {
             return _mm256_fmsub_pd(mul1.data, mul2.data, data);
+        }
+        DoubleX4 fnmadd(DoubleX4 mul1, DoubleX4 mul2) const
+        {
+            return _mm256_fnmadd_pd(mul1.data, mul2.data, data);
+        }
+        DoubleX4 fnmsub(DoubleX4 mul1, DoubleX4 mul2) const
+        {
+            return _mm256_fnmsub_pd(mul1.data, mul2.data, data);
         }
         DoubleX4 operator+(DoubleX4 input) const
         {
@@ -305,7 +312,7 @@ namespace hint_simd
         // 从连续的数组构造
         DoubleX8(double const *ptr)
         {
-            load(ptr);
+            loadu(ptr);
         }
         // 用4个数构造
         DoubleX8(double a7, double a6, double a5, double a4, double a3, double a2, double a1, double a0)
@@ -529,9 +536,10 @@ namespace hint
             static constexpr size_t table_len = len / len_div;
             static constexpr FloatTy unit = HINT_2PI / len;
             using Ty = FloatTy;
-            using TableTy = std::array<Ty, table_len>;
+            using TableTy = hint_simd::AlignAry<Ty, table_len>;
             CosTableStatic() {}
             CosTableStatic(int factor) { init(factor); }
+            void allocate() {}
             void init(int factor)
             {
                 for (size_t i = 0; i < table.size(); i++)
@@ -544,7 +552,7 @@ namespace hint
             auto get_it(size_t n = 0) const { return &table[n]; }
 
         private:
-            alignas(128) TableTy table;
+            TableTy table;
         };
 
         namespace hint_fht
@@ -562,6 +570,7 @@ namespace hint
                     using HalfTable = FHTTableRadix2<FloatTy, log_len - 1>;
                     using TableTy = CosTableStatic<FloatTy, log_len, 4>;
 
+                    static constexpr int factor = HalfTable::factor;
                     FHTTableRadix2()
                     {
                         // init();
@@ -574,47 +583,50 @@ namespace hint
                         }
                         HalfTable::init();
                         constexpr size_t table_len = table.table_len;
+                        table.allocate();
                         for (size_t i = 0; i < table_len; i += 2)
                         {
                             table[i] = HalfTable::table[i / 2];
-                            table[i + 1] = std::cos((i + 1) * table.unit);
+                            table[i + 1] = std::cos(FloatTy(i + 1) * factor * table.unit);
                         }
                         has_init = true;
                     }
                     static auto get_it(size_t n = 0) { return table.get_it(n); }
 
-                    alignas(128) static TableTy table;
+                    static TableTy table;
 
                 private:
                     static bool has_init;
                 };
 
                 template <typename FloatTy, int log_len>
-                alignas(128) typename FHTTableRadix2<FloatTy, log_len>::TableTy
+                typename FHTTableRadix2<FloatTy, log_len>::TableTy
                     FHTTableRadix2<FloatTy, log_len>::table;
                 template <typename FloatTy, int log_len>
                 bool FHTTableRadix2<FloatTy, log_len>::has_init = false;
 
                 template <typename FloatTy>
-                class FHTTableRadix2<FloatTy, 5>
+                class FHTTableRadix2<FloatTy, 4>
                 {
                 public:
-                    using TableTy = CosTableStatic<FloatTy, 5, 4>;
+                    using TableTy = CosTableStatic<FloatTy, 4, 4>;
+                    static constexpr int factor = 1;
                     FHTTableRadix2() { init(); }
                     static void init()
                     {
-                        table.init(1);
+                        table.init(factor);
                     }
                     static auto get_it(size_t n = 0) { return table.get_it(n); }
 
-                    alignas(128) static TableTy table;
+                    static TableTy table;
                 };
                 template <typename FloatTy>
-                alignas(128) typename FHTTableRadix2<FloatTy, 5>::TableTy FHTTableRadix2<FloatTy, 5>::table;
+                typename FHTTableRadix2<FloatTy, 4>::TableTy FHTTableRadix2<FloatTy, 4>::table;
 
                 template <size_t LEN, typename FloatTy>
                 struct FHT
                 {
+                    static_assert(std::is_same<Float64, FloatTy>::value, "AVX Only for double");
                     static constexpr size_t fht_len = LEN;
                     static constexpr size_t half_len = fht_len / 2;
                     static constexpr size_t quarter_len = fht_len / 4;
@@ -946,10 +958,424 @@ namespace hint
                     }
                 };
             }
+            // 分裂基FHT AVX加速 无查找表
+            namespace split_radix_avx
+            {
+                using hint_simd::DoubleX4;
+                template <size_t LEN, typename FloatTy>
+                struct FHT
+                {
+                    static_assert(std::is_same<Float64, FloatTy>::value, "AVX Only for double");
+                    static constexpr size_t fht_len = LEN;
+                    static constexpr size_t half_len = fht_len / 2;
+                    static constexpr size_t quarter_len = fht_len / 4;
+                    static constexpr size_t oct_len = fht_len / 8;
+                    static constexpr int log_len = hint_log2(fht_len);
+
+                    using HalfFHT = FHT<half_len, FloatTy>;
+                    using QuarterFHT = FHT<quarter_len, FloatTy>;
+
+                    static FloatTy cos_omega(size_t i)
+                    {
+                        return std::cos(i * HINT_2PI / fht_len);
+                    }
+                    static FloatTy sin_omega(size_t i)
+                    {
+                        return std::sin(i * HINT_2PI / fht_len);
+                    }
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out)
+                    {
+                        using value_type = typename std::iterator_traits<FloatIt>::value_type;
+                        static_assert(std::is_same<value_type, FloatTy>::value, "Must be same as the FHT template float type");
+
+                        QuarterFHT::dit(in_out + half_len + quarter_len);
+                        QuarterFHT::dit(in_out + half_len);
+                        HalfFHT::dit(in_out);
+                        transform2(in_out[half_len], in_out[half_len + quarter_len]);
+                        static constexpr value_type SQRT_2 = 1.4142135623730950488016887242097;
+                        in_out[half_len + oct_len] *= SQRT_2, in_out[half_len + oct_len + quarter_len] *= SQRT_2;
+
+                        auto it0 = in_out + 1, it1 = in_out + quarter_len - 1;
+                        auto it2 = it0 + quarter_len, it3 = it1 + quarter_len;
+                        static FloatTy cos_arr1[8] = {1, cos_omega(1), cos_omega(2), cos_omega(3), cos_omega(4), cos_omega(5), cos_omega(6), cos_omega(7)};
+                        static FloatTy sin_arr1[8] = {0, sin_omega(1), sin_omega(2), sin_omega(3), sin_omega(4), sin_omega(5), sin_omega(6), sin_omega(7)};
+                        static FloatTy cos_arr3[8] = {1, cos_omega(3), cos_omega(6), cos_omega(9), cos_omega(12), cos_omega(15), cos_omega(18), cos_omega(21)};
+                        static FloatTy sin_arr3[8] = {0, sin_omega(3), sin_omega(6), sin_omega(9), sin_omega(12), sin_omega(15), sin_omega(18), sin_omega(21)};
+                        for (; it0 < in_out + 4; it0++, it1--, it2++, it3--)
+                        {
+                            auto omega1 = std::complex<FloatTy>(cos_arr1[it0 - in_out], sin_arr1[it0 - in_out]);
+                            auto omega3 = std::complex<FloatTy>(cos_arr3[it0 - in_out], sin_arr3[it0 - in_out]);
+                            auto temp4 = it0[half_len], temp5 = it1[half_len];
+                            auto temp0 = temp4 * omega1.real() + temp5 * omega1.imag();
+                            auto temp2 = temp4 * omega1.imag() - temp5 * omega1.real();
+                            temp4 = it2[half_len], temp5 = it3[half_len];
+                            auto temp1 = temp4 * omega3.real() + temp5 * omega3.imag();
+                            auto temp3 = temp4 * omega3.imag() - temp5 * omega3.real();
+
+                            transform2(temp0, temp1);
+                            transform2(temp3, temp2);
+
+                            temp4 = it0[0], temp5 = it1[0];
+                            it0[0] = temp4 + temp0, it1[0] = temp5 + temp1;
+                            it0[half_len] = temp4 - temp0, it1[half_len] = temp5 - temp1;
+
+                            temp4 = it2[0], temp5 = it3[0];
+                            it2[0] = temp4 + temp2, it3[0] = temp5 + temp3;
+                            it2[half_len] = temp4 - temp2, it3[half_len] = temp5 - temp3;
+                        }
+                        it1 -= 3, it3 -= 3;
+                        static const DoubleX4 cos_unit1(cos_arr1[4]), sin_unit1(sin_arr1[4]);
+                        static const DoubleX4 cos_unit3 = DoubleX4(cos_arr3[4]);
+                        static const DoubleX4 sin_unit3 = DoubleX4(sin_arr3[4]);
+                        DoubleX4 cos1_4(cos_arr1 + 4), sin1_4(sin_arr1 + 4);
+                        DoubleX4 cos3_4 = DoubleX4(cos_arr3 + 4).reverse();
+                        DoubleX4 sin3_4 = DoubleX4(sin_arr3 + 4).reverse();
+                        for (; it0 < in_out + oct_len; it0 += 4, it1 -= 4, it2 += 4, it3 -= 4)
+                        {
+                            DoubleX4 temp0, temp1, temp2, temp3, temp4, temp5;
+                            temp4.loadu(&it0[half_len]), temp5.loadu(&it1[half_len]);
+                            temp5 = temp5.reverse();
+                            temp0 = (temp4 * cos1_4) + (temp5 * sin1_4);
+                            temp2 = (temp4 * sin1_4) - (temp5 * cos1_4);
+                            temp4.loadu(&it2[half_len]), temp5.loadu(&it3[half_len]);
+                            temp4 = temp4.reverse();
+                            temp1 = (temp5 * sin3_4) + (temp4 * cos3_4);
+                            temp3 = (temp4 * sin3_4) - (temp5 * cos3_4);
+
+                            temp4 = temp0, temp5 = temp1;
+                            temp0 = temp4 + temp5.reverse();
+                            temp1 = temp4.reverse() - temp5;
+                            temp4 = temp2, temp5 = temp3;
+                            temp2 = temp5.reverse() - temp4;
+                            temp3 = temp5 + temp4.reverse();
+
+                            temp4.loadu(&it0[0]), temp5.loadu(&it1[0]);
+                            (temp4 + temp0).storeu(&it0[0]);
+                            (temp5 + temp1).storeu(&it1[0]);
+                            (temp4 - temp0).storeu(&it0[half_len]);
+                            (temp5 - temp1).storeu(&it1[half_len]);
+
+                            temp4.loadu(&it2[0]), temp5.loadu(&it3[0]);
+                            (temp4 + temp2).storeu(&it2[0]);
+                            (temp5 + temp3).storeu(&it3[0]);
+                            (temp4 - temp2).storeu(&it2[half_len]);
+                            (temp5 - temp3).storeu(&it3[half_len]);
+
+                            temp0 = cos1_4, temp1 = sin1_4;
+                            cos1_4 = (temp0 * cos_unit1).fnmadd(temp1, sin_unit1);
+                            sin1_4 = (temp0 * sin_unit1).fmadd(temp1, cos_unit1);
+                            temp0 = cos3_4, temp1 = sin3_4;
+                            cos3_4 = (temp0 * cos_unit3).fnmadd(temp1, sin_unit3);
+                            sin3_4 = (temp0 * sin_unit3).fmadd(temp1, cos_unit3);
+                        }
+                        transform2(in_out[0], in_out[half_len]);
+                        transform2(in_out[oct_len], in_out[half_len + oct_len]);
+                        transform2(in_out[oct_len * 2], in_out[half_len + oct_len * 2]);
+                        transform2(in_out[oct_len * 3], in_out[half_len + oct_len * 3]);
+                    }
+
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out)
+                    {
+                        using value_type = typename std::iterator_traits<FloatIt>::value_type;
+                        static_assert(std::is_same<value_type, FloatTy>::value, "Must be same as the FHT template float type");
+
+                        transform2(in_out[0], in_out[half_len]);
+                        transform2(in_out[oct_len], in_out[half_len + oct_len]);
+                        transform2(in_out[oct_len * 2], in_out[half_len + oct_len * 2]);
+                        transform2(in_out[oct_len * 3], in_out[half_len + oct_len * 3]);
+                        auto it0 = in_out + 1, it1 = in_out + quarter_len - 1;
+                        auto it2 = it0 + quarter_len, it3 = it1 + quarter_len;
+                        static FloatTy cos_arr1[8] = {1, cos_omega(1), cos_omega(2), cos_omega(3), cos_omega(4), cos_omega(5), cos_omega(6), cos_omega(7)};
+                        static FloatTy sin_arr1[8] = {0, sin_omega(1), sin_omega(2), sin_omega(3), sin_omega(4), sin_omega(5), sin_omega(6), sin_omega(7)};
+                        static FloatTy cos_arr3[8] = {1, cos_omega(3), cos_omega(6), cos_omega(9), cos_omega(12), cos_omega(15), cos_omega(18), cos_omega(21)};
+                        static FloatTy sin_arr3[8] = {0, sin_omega(3), sin_omega(6), sin_omega(9), sin_omega(12), sin_omega(15), sin_omega(18), sin_omega(21)};
+                        for (; it0 < in_out + 4; it0++, it1--, it2++, it3--)
+                        {
+                            auto omega1 = std::complex<FloatTy>(cos_arr1[it0 - in_out], sin_arr1[it0 - in_out]);
+                            auto omega3 = std::complex<FloatTy>(cos_arr3[it0 - in_out], sin_arr3[it0 - in_out]);
+                            auto temp0 = it0[half_len], temp1 = it1[half_len];
+                            auto temp2 = it2[half_len], temp3 = it3[half_len];
+
+                            auto temp4 = it0[0], temp5 = it1[0];
+                            it0[0] = temp4 + temp0, it1[0] = temp5 + temp1;
+                            temp0 = temp4 - temp0, temp1 = temp5 - temp1;
+
+                            temp4 = it2[0], temp5 = it3[0];
+                            it2[0] = temp4 + temp2, it3[0] = temp5 + temp3;
+                            temp2 = temp4 - temp2, temp3 = temp5 - temp3;
+
+                            transform2(temp0, temp1);
+                            transform2(temp3, temp2);
+
+                            it0[half_len] = temp0 * omega1.real() + temp2 * omega1.imag();
+                            it1[half_len] = temp0 * omega1.imag() - temp2 * omega1.real();
+                            it2[half_len] = temp1 * omega3.real() + temp3 * omega3.imag();
+                            it3[half_len] = temp1 * omega3.imag() - temp3 * omega3.real();
+                        }
+                        it1 -= 3, it3 -= 3;
+                        static const DoubleX4 cos_unit1(cos_arr1[4]), sin_unit1(sin_arr1[4]);
+                        static const DoubleX4 cos_unit3 = DoubleX4(cos_arr3[4]);
+                        static const DoubleX4 sin_unit3 = DoubleX4(sin_arr3[4]);
+                        DoubleX4 cos1_4(cos_arr1 + 4), sin1_4(sin_arr1 + 4);
+                        DoubleX4 cos3_4 = DoubleX4(cos_arr3 + 4).reverse();
+                        DoubleX4 sin3_4 = DoubleX4(sin_arr3 + 4).reverse();
+                        for (; it0 < in_out + oct_len; it0 += 4, it1 -= 4, it2 += 4, it3 -= 4)
+                        {
+                            DoubleX4 temp0, temp1, temp2, temp3, temp4, temp5;
+                            temp0.loadu(&it0[half_len]), temp1.loadu(&it1[half_len]);
+                            temp2.loadu(&it2[half_len]), temp3.loadu(&it3[half_len]);
+
+                            temp4.loadu(&it0[0]), temp5.loadu(&it1[0]);
+                            (temp4 + temp0).storeu(&it0[0]);
+                            (temp5 + temp1).storeu(&it1[0]);
+                            temp0 = temp4 - temp0, temp1 = temp5 - temp1;
+
+                            temp4.loadu(&it2[0]), temp5.loadu(&it3[0]);
+                            (temp4 + temp2).storeu(&it2[0]);
+                            (temp5 + temp3).storeu(&it3[0]);
+                            temp2 = temp4 - temp2, temp3 = temp5 - temp3;
+
+                            temp4 = temp0, temp5 = temp1;
+                            temp0 = temp4 + temp5.reverse();
+                            temp1 = temp4.reverse() - temp5;
+                            temp4 = temp2, temp5 = temp3;
+                            temp2 = temp5.reverse() - temp4;
+                            temp3 = temp5 + temp4.reverse();
+
+                            (temp0 * cos1_4 + temp2 * sin1_4).storeu(&it0[half_len]);
+                            (temp0 * sin1_4 - temp2 * cos1_4).reverse().storeu(&it1[half_len]);
+                            (temp1 * cos3_4 + temp3 * sin3_4).reverse().storeu(&it2[half_len]);
+                            (temp1 * sin3_4 - temp3 * cos3_4).storeu(&it3[half_len]);
+
+                            temp0 = cos1_4, temp1 = sin1_4;
+                            cos1_4 = (temp0 * cos_unit1).fnmadd(temp1, sin_unit1);
+                            sin1_4 = (temp0 * sin_unit1).fmadd(temp1, cos_unit1);
+                            temp0 = cos3_4, temp1 = sin3_4;
+                            cos3_4 = (temp0 * cos_unit3).fnmadd(temp1, sin_unit3);
+                            sin3_4 = (temp0 * sin_unit3).fmadd(temp1, cos_unit3);
+                        }
+
+                        transform2(in_out[half_len], in_out[half_len + quarter_len]);
+                        static constexpr value_type SQRT_2 = 1.4142135623730950488016887242097;
+                        in_out[half_len + oct_len] *= SQRT_2, in_out[half_len + oct_len + quarter_len] *= SQRT_2;
+                        HalfFHT::dif(in_out);
+                        QuarterFHT::dif(in_out + half_len);
+                        QuarterFHT::dif(in_out + half_len + quarter_len);
+                    }
+                };
+
+                template <typename FloatTy>
+                struct FHT<0, FloatTy>
+                {
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out) {}
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out) {}
+                };
+
+                template <typename FloatTy>
+                struct FHT<1, FloatTy>
+                {
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out) {}
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out) {}
+                };
+
+                template <typename FloatTy>
+                struct FHT<2, FloatTy>
+                {
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out)
+                    {
+                        transform2(in_out[0], in_out[1]);
+                    }
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out)
+                    {
+                        transform2(in_out[0], in_out[1]);
+                    }
+                };
+
+                template <typename FloatTy>
+                struct FHT<4, FloatTy>
+                {
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out)
+                    {
+                        auto temp0 = in_out[0], temp1 = in_out[1];
+                        auto temp2 = in_out[2], temp3 = in_out[3];
+                        transform2(temp0, temp1);
+                        transform2(temp2, temp3);
+                        in_out[0] = temp0 + temp2;
+                        in_out[1] = temp1 + temp3;
+                        in_out[2] = temp0 - temp2;
+                        in_out[3] = temp1 - temp3;
+                    }
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out)
+                    {
+                        auto temp0 = in_out[0], temp1 = in_out[1];
+                        auto temp2 = in_out[2], temp3 = in_out[3];
+                        transform2(temp0, temp2);
+                        transform2(temp1, temp3);
+                        in_out[0] = temp0 + temp1;
+                        in_out[1] = temp0 - temp1;
+                        in_out[2] = temp2 + temp3;
+                        in_out[3] = temp2 - temp3;
+                    }
+                };
+
+                template <typename FloatTy>
+                struct FHT<8, FloatTy>
+                {
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out)
+                    {
+                        auto temp0 = in_out[0], temp1 = in_out[1];
+                        auto temp2 = in_out[2], temp3 = in_out[3];
+                        auto temp4 = in_out[4], temp5 = in_out[5];
+                        auto temp6 = in_out[6], temp7 = in_out[7];
+                        transform2(temp0, temp1);
+                        transform2(temp2, temp3);
+                        transform2(temp4, temp5);
+                        transform2(temp6, temp7);
+                        transform2(temp0, temp2);
+                        transform2(temp1, temp3);
+                        transform2(temp4, temp6);
+                        static constexpr decltype(temp0) SQRT_2 = 1.4142135623730950488016887242097;
+                        temp5 *= SQRT_2, temp7 *= SQRT_2;
+                        in_out[0] = temp0 + temp4;
+                        in_out[1] = temp1 + temp5;
+                        in_out[2] = temp2 + temp6;
+                        in_out[3] = temp3 + temp7;
+                        in_out[4] = temp0 - temp4;
+                        in_out[5] = temp1 - temp5;
+                        in_out[6] = temp2 - temp6;
+                        in_out[7] = temp3 - temp7;
+                    }
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out)
+                    {
+                        auto temp0 = in_out[0], temp1 = in_out[1];
+                        auto temp2 = in_out[2], temp3 = in_out[3];
+                        auto temp4 = in_out[4], temp5 = in_out[5];
+                        auto temp6 = in_out[6], temp7 = in_out[7];
+                        transform2(temp0, temp4);
+                        transform2(temp1, temp5);
+                        transform2(temp2, temp6);
+                        transform2(temp3, temp7);
+                        transform2(temp0, temp2);
+                        transform2(temp1, temp3);
+                        static constexpr decltype(temp0) SQRT_2 = 1.4142135623730950488016887242097;
+                        temp5 *= SQRT_2, temp7 *= SQRT_2;
+                        transform2(temp4, temp6);
+                        in_out[0] = temp0 + temp1;
+                        in_out[1] = temp0 - temp1;
+                        in_out[2] = temp2 + temp3;
+                        in_out[3] = temp2 - temp3;
+                        in_out[4] = temp4 + temp5;
+                        in_out[5] = temp4 - temp5;
+                        in_out[6] = temp6 + temp7;
+                        in_out[7] = temp6 - temp7;
+                    }
+                };
+
+                template <typename FloatTy>
+                struct FHT<16, FloatTy>
+                {
+                    static void init() {}
+                    template <typename FloatIt>
+                    static void dit(FloatIt in_out)
+                    {
+                        using value_type = typename std::iterator_traits<FloatIt>::value_type;
+                        FHT<4, FloatTy>::dit(in_out + 12);
+                        FHT<4, FloatTy>::dit(in_out + 8);
+                        FHT<8, FloatTy>::dit(in_out);
+                        static constexpr value_type SQRT_2 = 1.4142135623730950488016887242097;
+                        static constexpr value_type COS_16 = 0.9238795325112867561281831893967; // cos(2PI/16);
+                        static constexpr value_type SIN_16 = 0.3826834323650897717284599840304; // sin(2PI/16);
+                        auto temp4 = in_out[9], temp5 = in_out[11];
+                        auto temp0 = temp4 * COS_16 + temp5 * SIN_16;
+                        auto temp2 = temp4 * SIN_16 - temp5 * COS_16;
+
+                        temp4 = in_out[13], temp5 = in_out[15];
+                        auto temp1 = temp4 * SIN_16 + temp5 * COS_16;
+                        auto temp3 = temp4 * COS_16 - temp5 * SIN_16;
+
+                        transform2(temp0, temp1);
+                        transform2(temp3, temp2);
+
+                        temp4 = in_out[1], temp5 = in_out[3];
+                        in_out[1] = temp4 + temp0, in_out[3] = temp5 + temp1;
+                        in_out[9] = temp4 - temp0, in_out[11] = temp5 - temp1;
+
+                        temp4 = in_out[5], temp5 = in_out[7];
+                        in_out[5] = temp4 + temp2, in_out[7] = temp5 + temp3;
+                        in_out[13] = temp4 - temp2, in_out[15] = temp5 - temp3;
+
+                        in_out[10] *= SQRT_2, in_out[14] *= SQRT_2;
+                        transform2(in_out[8], in_out[12]);
+                        transform2(in_out[0], in_out[8]);
+                        transform2(in_out[2], in_out[10]);
+                        transform2(in_out[4], in_out[12]);
+                        transform2(in_out[6], in_out[14]);
+                    }
+                    template <typename FloatIt>
+                    static void dif(FloatIt in_out)
+                    {
+                        using value_type = typename std::iterator_traits<FloatIt>::value_type;
+                        static constexpr value_type SQRT_2 = 1.4142135623730950488016887242097;
+                        static constexpr value_type COS_16 = 0.9238795325112867561281831893967; // cos(2PI/16);
+                        static constexpr value_type SIN_16 = 0.3826834323650897717284599840304; // sin(2PI/16);
+                        transform2(in_out[0], in_out[8]);
+                        transform2(in_out[2], in_out[10]);
+                        transform2(in_out[4], in_out[12]);
+                        transform2(in_out[6], in_out[14]);
+                        transform2(in_out[8], in_out[12]);
+                        in_out[10] *= SQRT_2, in_out[14] *= SQRT_2;
+
+                        auto temp0 = in_out[9], temp1 = in_out[11];
+                        auto temp2 = in_out[13], temp3 = in_out[15];
+
+                        auto temp4 = in_out[1], temp5 = in_out[3];
+                        in_out[1] = temp4 + temp0;
+                        in_out[3] = temp5 + temp1;
+                        temp0 = temp4 - temp0;
+                        temp1 = temp5 - temp1;
+
+                        temp4 = in_out[5], temp5 = in_out[7];
+                        in_out[5] = temp4 + temp2;
+                        in_out[7] = temp5 + temp3;
+                        temp2 = temp4 - temp2;
+                        temp3 = temp5 - temp3;
+
+                        transform2(temp0, temp1);
+                        transform2(temp3, temp2);
+
+                        in_out[9] = temp0 * COS_16 + temp2 * SIN_16;
+                        in_out[11] = temp0 * SIN_16 - temp2 * COS_16;
+                        in_out[13] = temp1 * SIN_16 + temp3 * COS_16;
+                        in_out[15] = temp1 * COS_16 - temp3 * SIN_16;
+
+                        FHT<8, FloatTy>::dif(in_out);
+                        FHT<4, FloatTy>::dif(in_out + 8);
+                        FHT<4, FloatTy>::dif(in_out + 12);
+                    }
+                };
+            }
 
             // 默认FHT为分裂基
             template <size_t len, typename FloatTy>
-            using FHTDefault = radix2_avx::FHT<len, FloatTy>;
+            using FHTDefault = split_radix_avx::FHT<len, FloatTy>;
 
             /// @brief 初始化所有FHT查找表
             /// @tparam FloatTy
