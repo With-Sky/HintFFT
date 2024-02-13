@@ -1,4 +1,4 @@
-// TSKY 2024/2/12
+// TSKY 2024/2/13
 #include <vector>
 #include <array>
 #include <complex>
@@ -944,6 +944,42 @@ namespace hint
                 }
             }
 
+            // 实数快速傅里叶变换,利用FHT的结果进行变换
+            template <typename FloatTy>
+            inline void dft_real(const FloatTy in[], std::complex<FloatTy> out[], size_t len)
+            {
+                using Complex = std::complex<FloatTy>;
+                len = int_floor2(len);
+                std::vector<FloatTy> tmp_ary(in, in + len);
+                dht(tmp_ary.data(), len);
+
+                out[0] = tmp_ary[0];
+                out[len / 2] = tmp_ary[len / 2];
+                for (size_t i = 1; i < len / 2; i++)
+                {
+                    FloatTy temp0 = tmp_ary[i], temp1 = tmp_ary[len - i];
+                    Complex x0 = Complex(temp0 + temp1, temp0 - temp1) * FloatTy(0.5);
+                    out[i] = std::conj(x0), out[len - i] = x0;
+                }
+            }
+
+            // 实数快速傅里叶逆变换
+            template <typename FloatTy>
+            inline void idft_real(const std::complex<FloatTy> in[], FloatTy out[], size_t len)
+            {
+                using Complex = std::complex<FloatTy>;
+                len = int_floor2(len);
+                out[0] = in[0].real();
+                out[len / 2] = in[len / 2].real();
+                for (size_t i = 1; i < len / 2; i++)
+                {
+                    Complex x0 = in[i];
+                    FloatTy temp0 = x0.real(), temp1 = x0.imag();
+                    out[i] = temp0 - temp1, out[len - i] = temp0 + temp1;
+                }
+                idht(out, len);
+            }
+
             // FHT加速卷积
             template <typename FloatTy>
             inline void fht_convolution(FloatTy fht_ary1[], FloatTy fht_ary2[], FloatTy out[], size_t fht_len)
@@ -1194,19 +1230,51 @@ void result_test(const vector<T> &res, uint64_t ele)
     }
     cout << "success\n";
 }
+// FHT convolution
+// int main()
+// {
+//     hint::hint_transform::hint_fht::fht_init<double>();
+//     int n = 18;
+//     cin >> n;
+//     size_t len = 1 << n; // 变换长度
+//     uint64_t ele = 5;
+//     vector<uint32_t> in1(len / 2, ele);
+//     vector<uint32_t> in2(len / 2, ele); // 计算两个长度为len/2，每个元素为ele的卷积
+//     auto t1 = chrono::steady_clock::now();
+//     vector<uint32_t> res = poly_multiply(in1, in2);
+//     auto t2 = chrono::steady_clock::now();
+//     result_test<uint32_t>(res, ele); // 结果校验
+//     cout << chrono::duration_cast<chrono::microseconds>(t2 - t1).count() << "us\n";
+// }
 
+// Example DFT for real data
 int main()
 {
-    hint::hint_transform::hint_fht::fht_init<double>();
-    int n = 18;
-    cin >> n;
-    size_t len = 1 << n; // 变换长度
-    uint64_t ele = 5;
-    vector<uint32_t> in1(len / 2, ele);
-    vector<uint32_t> in2(len / 2, ele); // 计算两个长度为len/2，每个元素为ele的卷积
-    auto t1 = chrono::steady_clock::now();
-    vector<uint32_t> res = poly_multiply(in1, in2);
-    auto t2 = chrono::steady_clock::now();
-    result_test<uint32_t>(res, ele); // 结果校验
-    cout << chrono::duration_cast<chrono::microseconds>(t2 - t1).count() << "us\n";
+    cin.tie(nullptr)->sync_with_stdio(false);
+    cout.tie(nullptr)->sync_with_stdio(false);
+    using namespace hint;
+    using namespace hint_transform;
+    using namespace hint_fht;
+
+    constexpr size_t len = 1 << 18;
+    static Float64 r[len]{};   // real data
+    static Complex64 c[len]{}; // complex data
+    for (size_t i = 0; i < len; i++)
+    {
+        c[i] = r[i] = i;
+    }
+    fht_init<Float64>();
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    dft_real(r, c, len); // Real time data -> complex frequency data
+    auto t2 = std::chrono::high_resolution_clock::now();
+    idft_real(c, r, len); // Complex frequency data -> Real time data
+    auto t3 = std::chrono::high_resolution_clock::now();
+
+    for (size_t i = 0; i < len; i++)
+    {
+        std::cout << r[i] << c[i] << "\n";
+    }
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()
+              << "us " << std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() << "us\n";
 }
