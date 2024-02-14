@@ -208,7 +208,7 @@ namespace hint_simd
         // 从连续的数组构造
         Comple64x2(double const *ptr)
         {
-            data = _mm256_load_pd(ptr);
+            data = _mm256_loadu_pd(ptr);
         }
         Comple64x2(const Complex64 &a, const Complex64 &b)
         {
@@ -216,7 +216,7 @@ namespace hint_simd
         }
         Comple64x2(const Complex64 *ptr)
         {
-            load((const double *)ptr);
+            loadu((const double *)ptr);
         }
         void print() const
         {
