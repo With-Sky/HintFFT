@@ -1628,7 +1628,7 @@ void test_mul()
     auto t2 = std::chrono::steady_clock::now();
     for (size_t i = 0; i < c.size(); i++)
     {
-        // std::cout << std::hex << c[i] << "\n";
+        std::cout << std::hex << c[i] << "\n";
     }
     std::cout << std::dec << "time:" << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
 }
@@ -1674,7 +1674,7 @@ void ntt_dif(ModInt in_out[], size_t ntt_len)
         }
     }
 }
-#include "duck_ntt.cpp"
+
 void ntt_check(int s = 24)
 {
     using namespace hint;
@@ -1873,7 +1873,7 @@ void test_poly()
     auto t1 = chrono::steady_clock::now();
     for (size_t i = 0; i < 1000; i++)
     {
-        poly_multiply(a, len - 1, b, len - 1, c);
+        poly_multiply1(a, len - 1, b, len - 1, c);
     }
     auto t2 = chrono::steady_clock::now();
     for (auto i : c)
@@ -1895,8 +1895,8 @@ int main()
 #endif
 
     // ntt_check(23);
-    // test_mul();
-    test_ntt();
+    test_mul();//测试乘法
+    // test_ntt();//测试卷积
     // test_poly();
     // std::cout << hint::hint_transform::hint_ntt::add_count << "\t" << hint::hint_transform::hint_ntt::mul_count << "\n";
     // ntt_perf_loop();
