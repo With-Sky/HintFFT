@@ -224,35 +224,37 @@ namespace hint
                 static constexpr size_t TABLE_CPX_LEN = (size_t(1) << (LOG_END + 1)) / DIV;
                 // alignas(64) std::array<Float, TABLE_CPX_LEN * 2> table;
                 AlignMem<Float> table;
+                size_t log_current;
+                size_t stride;
+                Float factor;
 
             public:
-                TableFixMulti(size_t factor, size_t stride = 4) : table(TABLE_CPX_LEN * 2)
+                TableFixMulti(Float factor_in, size_t stride_in = 4, bool preload = true)
+                    : table(TABLE_CPX_LEN * 2), log_current(LOG_BEGIN), stride(stride_in), factor(factor_in)
                 {
                     assert(((size_t(1) << LOG_BEGIN) / DIV) % stride == 0);
-                    initBottomUp(factor, stride);
-                }
-                void initTopDown(size_t factor, size_t stride)
-                {
-                    static_assert(std::is_same<Float, Float64>::value);
-                    assert(stride == 4);
-                }
-                void initBottomUp(size_t factor, size_t stride)
-                {
-                    static_assert(std::is_same<Float, Float64>::value);
-                    assert(stride == 4);
+                    auto it = getBeginLog(LOG_BEGIN);
                     size_t len = size_t(1) << LOG_BEGIN, cpx_len = len / DIV;
                     Float theta = -HINT_2PI * factor / len;
-                    auto it = getBeginLog(LOG_BEGIN);
                     for (size_t i = 0; i < cpx_len; i++)
                     {
                         it[0] = std::cos(theta * i), it[stride] = std::sin(theta * i);
                         it += (i % stride == stride - 1 ? stride + 1 : 1);
                     }
-                    it = getBeginLog(LOG_BEGIN);
-                    for (int log_len = LOG_BEGIN + 1; log_len <= LOG_END; log_len++)
+                    if (preload)
                     {
-                        len = size_t(1) << log_len, cpx_len = len / DIV;
-                        theta = -HINT_2PI * factor / len;
+                        initBottomUp(LOG_END);
+                    }
+                }
+                void initBottomUp(size_t log_rank)
+                {
+                    static_assert(std::is_same<Float, Float64>::value);
+                    assert(stride == 4); // TODO: support other stride
+                    assert(log_rank <= LOG_END);
+                    for (int log_len = log_current + 1; log_len <= log_rank; log_len++)
+                    {
+                        size_t len = size_t(1) << log_len, cpx_len = len / DIV;
+                        Float theta = -HINT_2PI * factor / len;
                         auto it = getBeginLog(log_len), it_last = getBeginLog(log_len - 1);
                         C64X4 unit(std::cos(theta), std::sin(theta));
                         for (auto end = it + cpx_len * 2; it < end; it += 16, it_last += 8)
@@ -265,6 +267,7 @@ namespace hint
                             omega0.store(it), omega1.store(it + 8);
                         }
                     }
+                    log_current = std::max(log_current, log_rank);
                 }
                 constexpr const Float *getBeginLog(int log_rank) const
                 {
@@ -339,7 +342,7 @@ namespace hint
                 static const TableFix<Float64, 8> table_32_3;
                 static const TableFixMulti<Float64, 6, LOG_SHORT, 4> multi_table_3;
                 static const TableFixMulti<Float64, 6, LOG_SHORT, 4> multi_table_2;
-                static const TableFixMulti<Float64, 6, LOG_MAX, 4> multi_table_1;
+                static TableFixMulti<Float64, 6, LOG_MAX, 4> multi_table_1;
 
                 static constexpr const Float64 *it8 = &table_8[0];
                 static constexpr const Float64 *it16_1 = &table_16_1[0];
@@ -493,13 +496,15 @@ namespace hint
                 static void difIter(Float64 in_out[], size_t float_len)
                 {
                     size_t fft_len = float_len / 2;
+                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     assert(fft_len <= SHORT_LEN);
                     for (size_t rank = fft_len; rank >= 64; rank /= 4)
                     {
                         const size_t stride1 = rank / 2, stride2 = stride1 * 2, stride3 = stride1 * 3;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
-                            auto table1 = multi_table_1.getBegin(rank), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
+                            auto table1 = multi_table_1.getBegin(rank);
+                            auto table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
                             auto it0 = begin, it1 = begin + stride1, it2 = begin + stride2, it3 = begin + stride3;
                             for (; it0 < begin + stride1; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
@@ -525,6 +530,7 @@ namespace hint
                 static void iditIter(Float64 in_out[], size_t float_len)
                 {
                     size_t fft_len = float_len / 2;
+                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     assert(fft_len <= SHORT_LEN);
                     size_t rank = 0;
                     if (hint_log2(fft_len) % 2 == 0)
@@ -542,7 +548,8 @@ namespace hint
                         const size_t stride1 = rank / 2, stride2 = stride1 * 2, stride3 = stride1 * 3;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
-                            auto table1 = multi_table_1.getBegin(rank), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
+                            auto table1 = multi_table_1.getBegin(rank);
+                            auto table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
                             auto it0 = begin, it1 = begin + stride1, it2 = begin + stride2, it3 = begin + stride3;
                             for (; it0 < begin + stride1; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
@@ -570,6 +577,7 @@ namespace hint
                         assert(!FROM_RIRI_PERM);
                         return;
                     }
+                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     const size_t stride1 = float_len / 4, stride2 = stride1 * 2, stride3 = stride1 * 3;
                     auto table1 = multi_table_1.getBegin(fft_len);
                     for (auto end = in_out + stride1, it = in_out; it < end; it += 8, table1 += 8)
@@ -600,6 +608,7 @@ namespace hint
                         assert(!TO_INT64);
                         return;
                     }
+                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     using ToRIRI = std::integral_constant<bool, TO_RIRI_PERM>;
                     using ToI64 = std::integral_constant<bool, TO_INT64>;
                     const size_t stride1 = float_len / 4, stride2 = stride1 * 2, stride3 = stride1 * 3;
@@ -633,7 +642,7 @@ namespace hint
             const TableFix<Float64, 8> FFTAVX::table_32_3(32, 3, 4);
             const TableFixMulti<Float64, 6, FFTAVX::LOG_SHORT, 4> FFTAVX::multi_table_3(3);
             const TableFixMulti<Float64, 6, FFTAVX::LOG_SHORT, 4> FFTAVX::multi_table_2(2);
-            const TableFixMulti<Float64, 6, FFTAVX::LOG_MAX, 4> FFTAVX::multi_table_1(1);
+            TableFixMulti<Float64, 6, FFTAVX::LOG_MAX, 4> FFTAVX::multi_table_1(1, 4, false);
 
             constexpr const Float64 *FFTAVX::it8;
             constexpr const Float64 *FFTAVX::it16_1;
