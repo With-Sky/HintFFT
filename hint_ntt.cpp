@@ -809,13 +809,13 @@ namespace hint
                     rhs.data = redcLazy(uint64_t(data) * rhs.data);
                     return rhs;
                 }
-                constexpr MontInt32Lazy &operator+=(const MontInt32Lazy &rhs)
+                constexpr MontInt32Lazy &operator+=(MontInt32Lazy rhs)
                 {
                     rhs.data = data + rhs.data;
                     data = rhs.data < mod2() ? rhs.data : rhs.data - mod2();
                     return *this;
                 }
-                constexpr MontInt32Lazy &operator-=(const MontInt32Lazy &rhs)
+                constexpr MontInt32Lazy &operator-=(MontInt32Lazy rhs)
                 {
                     rhs.data = data - rhs.data;
                     data = rhs.data > data ? rhs.data + mod2() : rhs.data;
@@ -1742,7 +1742,7 @@ template <typename T>
 std::vector<T> poly_multiply(const std::vector<T> &in1, const std::vector<T> &in2)
 {
     using namespace hint::hint_transform::hint_ntt;
-    using NTT = NTT1;
+    using NTT = NTT4;
     size_t len1 = in1.size(), len2 = in2.size(), out_len = len1 + len2;
     std::vector<T> result(out_len);
     size_t ntt_len = hint::int_floor2(out_len);
@@ -1788,7 +1788,7 @@ void test_ntt()
     int n = 18;
     std::cin >> n;
     size_t len = size_t(1) << n; // 变换长度
-    uint64_t ele = 9999;
+    uint64_t ele = 5;
     std::vector<uint64_t> in1(len / 2, ele);
     std::vector<uint64_t> in2(len / 2, ele); // 计算两个长度为len/2，每个元素为ele的卷积
     auto t1 = std::chrono::steady_clock::now();
@@ -1895,8 +1895,8 @@ int main()
 #endif
 
     // ntt_check(23);
-    test_mul();//测试乘法
-    // test_ntt();//测试卷积
+    // test_mul();//测试乘法
+    test_ntt();//测试卷积
     // test_poly();
     // std::cout << hint::hint_transform::hint_ntt::add_count << "\t" << hint::hint_transform::hint_ntt::mul_count << "\n";
     // ntt_perf_loop();
