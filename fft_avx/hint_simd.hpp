@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <immintrin.h>
 
-#define __AVX__
+// #define __AVX__
 
 #ifndef HINT_SIMD_HPP
 #define HINT_SIMD_HPP
@@ -205,16 +205,12 @@ namespace hint_simd
             return a * b - c;
 #endif
         }
+        template <int N>
+        F64X4 permute4x64() const
+        {
 #ifdef __AVX2__
-        template <int N>
-        F64X4 permute4x64() const
-        {
             return _mm256_permute4x64_pd(data, N);
-        }
 #else
-        template <int N>
-        F64X4 permute4x64() const
-        {
             alignas(32) uint64_t arr[4];
             alignas(32) uint64_t dst[4];
             this->store(reinterpret_cast<F64 *>(arr));
@@ -223,8 +219,8 @@ namespace hint_simd
             dst[2] = arr[(N >> 4) & 3];
             dst[3] = arr[(N >> 6) & 3];
             return fromMem(reinterpret_cast<const F64 *>(dst));
-        }
 #endif
+        }
         static F64X4 extractEven64X4(const F64X4 &in0, const F64X4 &in1)
         {
             F64X4 result = _mm256_unpacklo_pd(in0.data, in1.data); // 0,1,2,3 4,5,6,7 -> 0,4,2,6
@@ -276,10 +272,10 @@ namespace hint_simd
         {
             return data;
         }
-#ifdef __AVX2__
         // Convert positive double to int64
         __m256i toI64X4() const
         {
+#ifdef __AVX2__
             constexpr uint64_t mask = (uint64_t(1) << 52) - 1;
             constexpr uint64_t offset = (uint64_t(1) << 10) - 1;
             const __m256i f64bits = _mm256_castpd_si256(data);
@@ -288,11 +284,8 @@ namespace hint_simd
             __m256i exp = _mm256_srli_epi64(f64bits, 52);
             exp = _mm256_sub_epi64(_mm256_set1_epi64x(offset + 52), exp);
             return _mm256_srlv_epi64(tail, exp);
-        }
 #else
 #pragma message("No AVX2 support")
-        __m256i toI64X4() const
-        {
             alignas(32) F64 arr[4];
             alignas(32) int64_t i64_arr[4];
             this->store(arr);
@@ -301,8 +294,8 @@ namespace hint_simd
             i64_arr[2] = arr[2];
             i64_arr[3] = arr[3];
             return _mm256_load_si256(reinterpret_cast<const __m256i *>(i64_arr));
-        }
 #endif
+        }
         template <int N>
         F64 nthEle() const
         {

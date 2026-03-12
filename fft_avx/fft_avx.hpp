@@ -873,73 +873,74 @@ namespace hint
 
             // inv = 1 / float_len in AVX function
             template <size_t RI_DIFF = 1, typename Float>
-            inline void real_dot_binrev(Float in_out[], Float in[], size_t float_len, Float inv = -1)
+            inline void real_dot_binrev(Float in_out[], const Float in[], size_t float_len, Float inv = -1)
             {
+                constexpr size_t MAX_LEN = 32;
+                constexpr int LOG_LEN = hint_log2(MAX_LEN);
                 static_assert(is_2pow(RI_DIFF));
+                static_assert(RI_DIFF <= 8);
                 assert(is_2pow(float_len));
+                assert(float_len <= MAX_LEN);
+                if (float_len < 2)
+                {
+                    return;
+                }
                 assert(float_len >= RI_DIFF * 2);
-                auto transToRIRI = [](Float arr[], size_t len)
+                auto idx_trans = [](size_t idx)
                 {
-                    if (RI_DIFF == 1)
-                    {
-                        return;
-                    }
-                    Float temp[RI_DIFF * 2]{};
-                    for (auto it = arr, end = arr + len; it < end; it += RI_DIFF * 2)
-                    {
-                        std::copy(it, it + RI_DIFF * 2, temp);
-                        for (size_t i = 0; i < RI_DIFF; i++)
-                        {
-                            it[i * 2] = temp[i];
-                            it[i * 2 + 1] = temp[i + RI_DIFF];
-                        }
-                    }
+                    return (idx / RI_DIFF) * RI_DIFF * 2 + idx % RI_DIFF;
                 };
-                auto transToRRII = [](Float arr[], size_t len)
+                auto get_omega = [](size_t idx, size_t rank)
                 {
-                    if (RI_DIFF == 1)
-                    {
-                        return;
-                    }
-                    Float temp[RI_DIFF * 2]{};
-                    for (auto it = arr, end = arr + len; it < end; it += RI_DIFF * 2)
-                    {
-                        for (size_t i = 0; i < RI_DIFF; i++)
-                        {
-                            temp[i] = it[i * 2];
-                            temp[i + RI_DIFF] = it[i * 2 + 1];
-                        }
-                        std::copy(temp, temp + RI_DIFF * 2, it);
-                    }
+                    return std::polar<Float>(1, -HINT_PI * Float(idx) / rank);
                 };
-                transToRIRI(in_out, float_len);
-                transToRIRI(in, float_len);
                 using Complex = std::complex<Float>;
+                static const Complex table[]{
+                    get_omega(bitrev(4, LOG_LEN), MAX_LEN),
+                    get_omega(bitrev(5, LOG_LEN), MAX_LEN),
+                    get_omega(bitrev(8, LOG_LEN), MAX_LEN),
+                    get_omega(bitrev(9, LOG_LEN), MAX_LEN),
+                    get_omega(bitrev(10, LOG_LEN), MAX_LEN),
+                    get_omega(bitrev(11, LOG_LEN), MAX_LEN),
+                };
                 inv = inv < 0 ? Float(2) / float_len : inv * Float(2);
+                auto r0 = in_out[0], i0 = in_out[RI_DIFF], r1 = in[0], i1 = in[RI_DIFF];
+                transform2(r0, i0);
+                transform2(r1, i1);
+                r0 *= r1, i0 *= i1;
+                transform2(r0, i0);
+                in_out[0] = r0 * 0.5 * inv, in_out[RI_DIFF] = i0 * 0.5 * inv;
+                if (float_len >= 4)
                 {
-                    auto r0 = in_out[0], i0 = in_out[1], r1 = in[0], i1 = in[1];
-                    transform2(r0, i0);
-                    transform2(r1, i1);
-                    r0 *= r1, i0 *= i1;
-                    transform2(r0, i0);
-                    in_out[0] = r0 * 0.5 * inv, in_out[1] = i0 * 0.5 * inv;
-                    auto temp = Complex(in_out[2], in_out[3]) * Complex(in[2], in[3]) * inv;
-                    in_out[2] = temp.real(), in_out[3] = temp.imag();
-                    inv /= Float(8);
-                    dot_rfft(&in_out[4], &in_out[6], &in[4], &in[6], Complex(COS_PI_8, -COS_PI_8), inv);
+                    Complex temp(in_out[idx_trans(1)], in_out[idx_trans(1) + RI_DIFF]);
+                    temp *= Complex(in[idx_trans(1)], in[idx_trans(1) + RI_DIFF]) * inv;
+                    in_out[idx_trans(1)] = temp.real(), in_out[idx_trans(1) + RI_DIFF] = temp.imag();
                 }
-                BinRevTableComplexIterHP<Float> table(31, 32);
-                for (size_t begin = 8; begin < float_len; begin *= 2)
+                if (float_len >= 8)
                 {
-                    table.reset(begin / 2);
-                    auto it0 = in_out + begin, it1 = it0 + begin - 2, it2 = in + begin, it3 = it2 + begin - 2;
-                    for (; it0 < it1; it0 += 2, it1 -= 2, it2 += 2, it3 -= 2)
-                    {
-                        auto omega = table.iterate();
-                        dot_rfft(it0, it1, it2, it3, omega, inv);
-                    }
+                    inv *= Float(0.125);
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(2)], &in_out[idx_trans(3)],
+                                      &in[idx_trans(2)], &in[idx_trans(3)], Complex(COS_PI_8, -COS_PI_8), inv);
                 }
-                transToRRII(in_out, float_len);
+
+                if (float_len >= 16)
+                {
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(4)], &in_out[idx_trans(7)],
+                                      &in[idx_trans(4)], &in[idx_trans(7)], table[0], inv);
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(5)], &in_out[idx_trans(6)],
+                                      &in[idx_trans(5)], &in[idx_trans(6)], table[1], inv);
+                }
+                if (float_len >= 32)
+                {
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(8)], &in_out[idx_trans(15)],
+                                      &in[idx_trans(8)], &in[idx_trans(15)], table[2], inv);
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(9)], &in_out[idx_trans(14)],
+                                      &in[idx_trans(9)], &in[idx_trans(14)], table[3], inv);
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(10)], &in_out[idx_trans(13)],
+                                      &in[idx_trans(10)], &in[idx_trans(13)], table[4], inv);
+                    dot_rfft<RI_DIFF>(&in_out[idx_trans(11)], &in_out[idx_trans(12)],
+                                      &in[idx_trans(11)], &in[idx_trans(12)], table[5], inv);
+                }
             }
 
             inline void real_dot_binrev4(Float64 in_out[], Float64 in[], size_t float_len)
