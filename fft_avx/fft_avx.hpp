@@ -738,67 +738,6 @@ namespace hint
                 int pop;
                 int log_max_iter, log_fft_len;
             };
-
-            template <typename FloatTy>
-            class BinRevTableComplexIterHP
-            {
-            public:
-                using Complex = std::complex<FloatTy>;
-                static constexpr int MAX_LOG_LEN = 32;
-                static constexpr size_t MAX_LEN = size_t(1) << MAX_LOG_LEN;
-
-                BinRevTableComplexIterHP(int log_max_iter_in, int log_fft_len_in)
-                    : index(0), pop(0), log_max_iter(log_max_iter_in), log_fft_len(log_fft_len_in)
-                {
-                    assert(log_max_iter <= log_fft_len);
-                    assert(log_fft_len <= MAX_LOG_LEN);
-                    const FloatTy factor = FloatTy(1) / (size_t(1) << (log_fft_len - log_max_iter));
-                    for (int i = 0; i < MAX_LOG_LEN; i++)
-                    {
-                        units[i] = getOmega(size_t(1) << (i + 1), 1, factor);
-                    }
-                    table[0] = Complex(1, 0);
-                }
-                void reset(size_t i = 0)
-                {
-                    index = i;
-                    if (i == 0)
-                    {
-                        pop = 0;
-                        return;
-                    }
-                    pop = hint_popcnt(i);
-                    const size_t len = size_t(1) << log_fft_len;
-                    for (int p = pop; p > 0; p--)
-                    {
-                        table[p] = getOmega(len, bitrev(i, log_max_iter));
-                        i &= (i - 1);
-                    }
-                }
-                Complex iterate()
-                {
-                    Complex res = table[pop];
-                    index++;
-                    int zero = hint_ctz(index);
-                    pop -= zero;
-                    table[pop + 1] = table[pop] * units[zero];
-                    pop++;
-                    return res;
-                }
-
-                static Complex getOmega(size_t n, size_t index, FloatTy factor = 1)
-                {
-                    FloatTy theta = -HINT_2PI * index / n;
-                    return std::polar<FloatTy>(1, theta * factor);
-                }
-
-            private:
-                Complex units[MAX_LOG_LEN]{};
-                Complex table[MAX_LOG_LEN]{};
-                size_t index;
-                int pop;
-                int log_max_iter, log_fft_len;
-            };
             template <size_t RI_DIFF = 1, typename FloatTy>
             inline void dot_rfft(FloatTy *inout0, FloatTy *inout1, const FloatTy *in0, const FloatTy *in1,
                                  const std::complex<FloatTy> &omega0, const FloatTy factor = 1)
