@@ -1,4 +1,4 @@
-// TSKY 2026/2/16
+// TSKY 2026/3/15
 
 #include <complex>
 #include <vector>
@@ -461,22 +461,21 @@ namespace hint
                         return;
                     }
                     expand(float_len);
-                    const size_t fft_len = float_len / 2, c2_len = fft_len / 2;
-                    const size_t stride1 = c2_len / 4, stride2 = stride1 * 2, stride3 = stride1 * 3;
-                    auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(fft_len));
-                    auto tp3 = reinterpret_cast<const C2 *>(table3.getBegin(fft_len));
-                    auto it = reinterpret_cast<C2 *>(inout);
-                    for (auto end = it + stride1; it < end; it++, tp1++, tp3++)
+                    size_t stride = float_len / 16;
+                    auto it0 = reinterpret_cast<C2 *>(inout), it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                    auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(float_len / 2));
+                    auto tp3 = reinterpret_cast<const C2 *>(table3.getBegin(float_len / 2));
+                    for (auto end = it1; it0 < end; it0++, it1++, it2++, it3++, tp1++, tp3++)
                     {
-                        C2 c0 = it[0], c1 = it[stride1], c2 = it[stride2], c3 = it[stride3];
+                        C2 c0 = it0[0], c1 = it1[0], c2 = it2[0], c3 = it3[0];
                         if (RIRI_IN)
                         {
                             c0.permute(), c1.permute(), c2.permute(), c3.permute();
                         }
                         difSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                        it[0] = c0, it[stride1] = c1, it[stride2] = c2.mul(tp1[0]), it[stride3] = c3.mul(tp3[0]);
+                        it0[0] = c0, it1[0] = c1, it2[0] = c2.mul(tp1[0]), it3[0] = c3.mul(tp3[0]);
                     }
-                    size_t stride = float_len / 4;
+                    stride *= 4;
                     dif<false>(inout, stride * 2);
                     dif<false>(inout + stride * 2, stride);
                     dif<false>(inout + stride * 3, stride);
@@ -494,20 +493,19 @@ namespace hint
                     idit<false>(inout, stride * 2);
                     idit<false>(inout + stride * 2, stride);
                     idit<false>(inout + stride * 3, stride);
-                    const size_t fft_len = float_len / 2, c2_len = fft_len / 2;
-                    const size_t stride1 = c2_len / 4, stride2 = stride1 * 2, stride3 = stride1 * 3;
-                    auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(fft_len));
-                    auto tp3 = reinterpret_cast<const C2 *>(table3.getBegin(fft_len));
-                    auto it = reinterpret_cast<C2 *>(inout);
-                    for (auto end = it + stride1; it < end; it++, tp1++, tp3++)
+                    stride /= 4;
+                    auto it0 = reinterpret_cast<C2 *>(inout), it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                    auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(float_len / 2));
+                    auto tp3 = reinterpret_cast<const C2 *>(table3.getBegin(float_len / 2));
+                    for (auto end = it1; it0 < end; it0++, it1++, it2++, it3++, tp1++, tp3++)
                     {
-                        C2 c0 = it[0], c1 = it[stride1], c2 = it[stride2].mulConj(tp1[0]), c3 = it[stride3].mulConj(tp3[0]);
+                        C2 c0 = it0[0], c1 = it1[0], c2 = it2[0].mulConj(tp1[0]), c3 = it3[0].mulConj(tp3[0]);
                         iditSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
                         if (RIRI_OUT)
                         {
                             c0.permute(), c1.permute(), c2.permute(), c3.permute();
                         }
-                        it[0] = c0, it[stride1] = c1, it[stride2] = c2, it[stride3] = c3;
+                        it0[0] = c0, it1[0] = c1, it2[0] = c2, it3[0] = c3;
                     }
                 }
 
@@ -810,7 +808,8 @@ namespace hint
                 for (size_t begin = 16; begin < float_len; begin *= 2)
                 {
                     table.reset(begin / 2);
-                    auto it0 = in_out + begin, it1 = it0 + begin - 4, it2 = in + begin, it3 = it2 + begin - 4;
+                    auto it0 = in_out + begin, it1 = it0 + begin - 4;
+                    auto it2 = in + begin, it3 = it2 + begin - 4;
                     for (; it0 < it1; it0 += 4, it1 -= 4, it2 += 4, it3 -= 4)
                     {
                         dot_rfftX2(it0, it1, it2, it3, table.iterate(), invx);
@@ -843,12 +842,12 @@ void test_conv()
 {
     alignas(32) static double arr1[1 << 23] = {};
     alignas(32) static double arr2[1 << 23] = {};
-    size_t len = 1 << 19, loop = 1e6;
+    size_t len = 1 << 19, loop = 1e3;
 
     for (int i = 0; i < len / 2; i++)
     {
-        arr1[i] = 5000;
-        arr2[i] = 2000;
+        arr1[i] = 5;
+        arr2[i] = 2;
     }
     auto t1 = std::chrono::steady_clock::now();
     {
@@ -862,9 +861,10 @@ void test_conv()
     std::cout << "\n";
     std::cout << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
 }
-
+#include "bind_cpu.hpp"
 int main()
 {
+    bind_cpu(0);
     std::ios::sync_with_stdio(false);
     std::cout.tie(nullptr);
     test_conv();
