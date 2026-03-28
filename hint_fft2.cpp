@@ -476,9 +476,9 @@ namespace hint
                         it0[0] = c0, it1[0] = c1, it2[0] = c2.mul(tp1[0]), it3[0] = c3.mul(tp3[0]);
                     }
                     stride *= 4;
-                    dif<false>(inout, stride * 2);
-                    dif<false>(inout + stride * 2, stride);
-                    dif<false>(inout + stride * 3, stride);
+                    dif_stack(inout, stride * 2);
+                    dif_stack(inout + stride * 2, stride);
+                    dif_stack(inout + stride * 3, stride);
                 }
                 template <bool RIRI_OUT>
                 void idit(Float inout[], size_t float_len)
@@ -490,9 +490,9 @@ namespace hint
                     }
                     expand(float_len);
                     size_t stride = float_len / 4;
-                    idit<false>(inout, stride * 2);
-                    idit<false>(inout + stride * 2, stride);
-                    idit<false>(inout + stride * 3, stride);
+                    idit_stack(inout, stride * 2);
+                    idit_stack(inout + stride * 2, stride);
+                    idit_stack(inout + stride * 3, stride);
                     stride /= 4;
                     auto it0 = reinterpret_cast<C2 *>(inout), it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
                     auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(float_len / 2));
@@ -506,6 +506,102 @@ namespace hint
                             c0.permute(), c1.permute(), c2.permute(), c3.permute();
                         }
                         it0[0] = c0, it1[0] = c1, it2[0] = c2, it3[0] = c3;
+                    }
+                }
+
+                void dif_stack(Float inout[], size_t float_len)
+                {
+                    struct Task
+                    {
+                        Float *inout;
+                        size_t len;
+                    };
+
+                    hint::StaticStack<Task, 64> stack;
+                    // 初始任务
+                    stack.push({inout, float_len});
+
+                    while (!stack.empty())
+                    {
+                        Task cur = stack.top();
+                        stack.pop();
+                        if (cur.len <= 8)
+                        {
+                            difSmall<false>(cur.inout, cur.len);
+                            continue;
+                        }
+                        expand(cur.len);
+                        size_t stride = cur.len / 16;
+                        auto it0 = reinterpret_cast<C2 *>(inout), it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                        auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(cur.len / 2));
+                        auto tp3 = reinterpret_cast<const C2 *>(table3.getBegin(cur.len / 2));
+                        for (auto end = it1; it0 < end; it0++, it1++, it2++, it3++, tp1++, tp3++)
+                        {
+                            C2 c0 = it0[0], c1 = it1[0], c2 = it2[0], c3 = it3[0];
+                            difSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
+                            it0[0] = c0, it1[0] = c1, it2[0] = c2.mul(tp1[0]), it3[0] = c3.mul(tp3[0]);
+                        }
+                        // 3. 将子任务压入栈中
+                        // 原始逻辑：dif<false>(..., stride*2), dif<false>(..., stride), dif<false>(..., stride)
+                        // 为了保持和递归一样的执行顺序，建议反向压栈
+                        size_t stride = cur.len / 4;
+                        stack.push({cur.inout + stride * 3, stride}); // 对应 dif<false>(inout + stride * 3, stride)
+                        stack.push({cur.inout + stride * 2, stride}); // 对应 dif<false>(inout + stride * 2, stride)
+                        stack.push({cur.inout, stride * 2});          // 对应 dif<false>(inout, stride * 2)
+                    }
+                }
+
+                void idit_stack(Float inout[], size_t float_len)
+                {
+                    struct Task
+                    {
+                        Float *inout;
+                        size_t len;
+                        bool visited; // 关键：标记是否已经处理完子任务
+                    };
+
+                    hint::StaticStack<Task, 64> stack;
+                    stack.push({inout, float_len, false});
+
+                    while (!stack.empty())
+                    {
+                        Task cur = stack.top();
+                        stack.pop();
+
+                        if (cur.len <= 8)
+                        {
+                            iditSmall<false>(cur.inout, cur.len);
+                            continue;
+                        }
+
+                        if (!cur.visited)
+                        {
+                            // --- 模拟递归下行 ---
+                            // 将当前任务重新入栈，并标记为已访问（待合并）
+                            stack.push({cur.inout, cur.len, true});
+
+                            size_t stride = cur.len / 4;
+                            // 注意入栈顺序：由于栈是后进先出，为了保持原代码递归顺序 (1,2,3)
+                            // 我们需要反向入栈 (3, 2, 1)
+                            stack.push({cur.inout + stride * 3, stride, false});
+                            stack.push({cur.inout + stride * 2, stride, false});
+                            stack.push({cur.inout, stride * 2, false});
+                        }
+                        else
+                        {
+                            // --- 模拟递归上行（蝶形运算逻辑） ---
+                            expand(cur.len);
+                            size_t stride = cur.len / 16;
+                            auto it0 = reinterpret_cast<C2 *>(inout), it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                            auto tp1 = reinterpret_cast<const C2 *>(table1.getBegin(cur.len / 2));
+                            auto tp3 = reinterpret_cast<const C2 *>(table3.getBegin(cur.len / 2));
+                            for (auto end = it1; it0 < end; it0++, it1++, it2++, it3++, tp1++, tp3++)
+                            {
+                                C2 c0 = it0[0], c1 = it1[0], c2 = it2[0].mulConj(tp1[0]), c3 = it3[0].mulConj(tp3[0]);
+                                iditSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
+                                it0[0] = c0, it1[0] = c1, it2[0] = c2, it3[0] = c3;
+                            }
+                        }
                     }
                 }
 
@@ -849,6 +945,8 @@ void test_conv()
         arr1[i] = 5;
         arr2[i] = 2;
     }
+    std::memset(arr1 + len / 2, 0, sizeof(double) * (len - len / 2));
+    std::memset(arr2 + len / 2, 0, sizeof(double) * (len - len / 2));
     auto t1 = std::chrono::steady_clock::now();
     {
         hint::transform::fft::real_conv(arr1, arr2, len);
