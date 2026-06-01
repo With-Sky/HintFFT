@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cassert>
 #include <cstring>
+#include <chrono>
 
 namespace hint
 {
@@ -186,12 +187,12 @@ namespace hint
         {
             using F64 = Float64;
             using C64 = std::complex<F64>;
-            using F64X4 = hint_simd::Float64X4;
-            using C64X4 = hint_simd::Complex64X4;
+            using F64X4 = Float64X4;
+            using C64X4 = Complex64X4;
             template <typename Float, size_t OMEGA_LEN>
             class TableFix
             {
-                alignas(64) std::array<Float, OMEGA_LEN * 2> table;
+                alignas(64) Float table[OMEGA_LEN * 2];
 
             public:
                 TableFix(size_t theta_divider, size_t factor, size_t stride)
@@ -211,10 +212,6 @@ namespace hint
                 {
                     return table[index];
                 }
-                constexpr const Float *getOmegaIt(size_t index) const
-                {
-                    return &table[index];
-                }
             };
             template <typename Float, int LOG_BEGIN, int LOG_END, int DIV>
             class TableFixMulti
@@ -222,39 +219,31 @@ namespace hint
                 static_assert(LOG_END >= LOG_BEGIN);
                 static_assert(is_2pow(DIV));
                 static constexpr size_t TABLE_CPX_LEN = (size_t(1) << (LOG_END + 1)) / DIV;
-                // alignas(64) std::array<Float, TABLE_CPX_LEN * 2> table;
-                AlignMem<Float> table;
-                size_t log_current;
-                size_t stride;
-                Float factor;
+                alignas(64) Float table[TABLE_CPX_LEN * 2];
 
             public:
-                TableFixMulti(Float factor_in, size_t stride_in = 4, bool preload = true)
-                    : table(TABLE_CPX_LEN * 2), log_current(LOG_BEGIN), stride(stride_in), factor(factor_in)
+                TableFixMulti(size_t factor, size_t stride = 4)
                 {
                     assert(((size_t(1) << LOG_BEGIN) / DIV) % stride == 0);
-                    auto it = getBeginLog(LOG_BEGIN);
+                    initBottomUp(factor, stride);
+                }
+                void initBottomUp(size_t factor, size_t stride)
+                {
+                    static_assert(std::is_same<Float, Float64>::value);
+                    assert(stride == 4);
                     size_t len = size_t(1) << LOG_BEGIN, cpx_len = len / DIV;
                     Float theta = -HINT_2PI * factor / len;
+                    auto it = getBeginLog(LOG_BEGIN);
                     for (size_t i = 0; i < cpx_len; i++)
                     {
                         it[0] = std::cos(theta * i), it[stride] = std::sin(theta * i);
                         it += (i % stride == stride - 1 ? stride + 1 : 1);
                     }
-                    if (preload)
+                    it = getBeginLog(LOG_BEGIN);
+                    for (int log_len = LOG_BEGIN + 1; log_len <= LOG_END; log_len++)
                     {
-                        initBottomUp(LOG_END);
-                    }
-                }
-                void initBottomUp(size_t log_rank)
-                {
-                    static_assert(std::is_same<Float, Float64>::value);
-                    assert(stride == 4); // TODO: support other stride
-                    assert(log_rank <= LOG_END);
-                    for (int log_len = log_current + 1; log_len <= log_rank; log_len++)
-                    {
-                        size_t len = size_t(1) << log_len, cpx_len = len / DIV;
-                        Float theta = -HINT_2PI * factor / len;
+                        len = size_t(1) << log_len, cpx_len = len / DIV;
+                        theta = -HINT_2PI * factor / len;
                         auto it = getBeginLog(log_len), it_last = getBeginLog(log_len - 1);
                         C64X4 unit(std::cos(theta), std::sin(theta));
                         for (auto end = it + cpx_len * 2; it < end; it += 16, it_last += 8)
@@ -267,7 +256,6 @@ namespace hint
                             omega0.store(it), omega1.store(it + 8);
                         }
                     }
-                    log_current = std::max(log_current, log_rank);
                 }
                 constexpr const Float *getBeginLog(int log_rank) const
                 {
@@ -285,6 +273,112 @@ namespace hint
                 {
                     return &table[rank * 2 / DIV];
                 }
+            };
+            template <int CACHE_LOG_LEN>
+            class FFTSqrtTableC64X4
+            {
+            public:
+                using F64 = double;
+                using C64 = std::complex<double>;
+                using C64X4 = hint_simd::Complex64X4;
+                static constexpr size_t CACHE_LEN = size_t(1) << CACHE_LOG_LEN;
+                static constexpr size_t MASK = CACHE_LEN - 1;
+                static constexpr size_t C4_COUNT = sizeof(C64X4) / sizeof(C64);
+                ~FFTSqrtTableC64X4()
+                {
+                    if (high)
+                    {
+                        delete[] high;
+                    }
+                }
+                FFTSqrtTableC64X4() {}
+                FFTSqrtTableC64X4(size_t fft_len, int len_div, int factor)
+                {
+                    init(fft_len, len_div, factor);
+                }
+                void init(size_t fft_len, int len_div, int factor)
+                {
+                    size_t table_len = fft_len / len_div;
+                    size_t low_len = CACHE_LEN * C4_COUNT, high_len = table_len / low_len;
+                    assert(is_2pow(fft_len));
+                    assert(table_len >= low_len);
+                    if (high != nullptr)
+                    {
+                        delete[] high;
+                    }
+                    high = new C64[high_len];
+                    const F64 theta = -HINT_2PI * factor / fft_len;
+                    auto p = reinterpret_cast<F64 *>(&low[0]);
+                    p[0] = 1, p[4] = 0;
+                    p[1] = std::cos(theta), p[5] = std::sin(theta);
+                    p[2] = std::cos(theta * 2), p[6] = std::sin(theta * 2);
+                    p[3] = std::cos(theta * 3), p[7] = std::sin(theta * 3);
+                    for (size_t begin = 1; begin < CACHE_LEN; begin *= 2)
+                    {
+                        size_t nth = begin * C4_COUNT;
+                        C64X4 unit;
+                        unit.set1(std::cos(theta * nth), std::sin(theta * nth));
+                        for (size_t i = 0; i < begin; i++)
+                        {
+                            low[i + begin] = low[i].mul(unit);
+                        }
+                    }
+                    high[0] = C64(1, 0);
+                    for (size_t begin = 1; begin < high_len; begin *= 2)
+                    {
+                        C64 unit = std::polar<F64>(1.0, theta * begin * low_len);
+                        for (size_t i = 0; i < begin; i++)
+                        {
+                            high[i + begin] = high[i] * unit;
+                        }
+                    }
+                }
+                C64X4 operator[](size_t i) const
+                {
+                    C64X4 hi;
+                    auto p = reinterpret_cast<const F64 *>(&high[i >> CACHE_LOG_LEN]);
+                    hi.load1(p, p + 1);
+                    return low[i & MASK].mul(hi);
+                }
+
+            private:
+                C64X4 low[CACHE_LEN];
+                C64 *high = nullptr;
+            };
+
+            template <int DIV, int LOG_SHORT_LEN, int LOG_MAX, int CACHE_LOG_LEN>
+            class FFTTableSqrt
+            {
+                using TableLong = FFTSqrtTableC64X4<CACHE_LOG_LEN>;
+                static constexpr size_t SHORT_LEN = size_t(1) << LOG_SHORT_LEN;
+                static constexpr size_t TABLE_LEN = LOG_MAX - LOG_SHORT_LEN + 1;
+
+            public:
+                FFTTableSqrt(int factor)
+                {
+                    for (int i = 0; i < TABLE_LEN; i++)
+                    {
+                        size_t fft_len = SHORT_LEN << (i + 1);
+                        table[i].init(fft_len, DIV, factor);
+                    }
+                }
+                const TableLong &operator[](int log_len) const
+                {
+                    log_len -= (LOG_SHORT_LEN + 1);
+                    assert(log_len >= 0);
+                    assert(log_len < TABLE_LEN);
+                    return table[log_len];
+                }
+                TableLong &operator[](int log_len)
+                {
+                    log_len -= (LOG_SHORT_LEN + 1);
+                    assert(log_len >= 0);
+                    assert(log_len < TABLE_LEN);
+                    return table[log_len];
+                }
+
+            private:
+                TableLong table[TABLE_LEN];
             };
 
             struct FFT
@@ -331,32 +425,25 @@ namespace hint
 
             struct FFTAVX : public FFT
             {
-                static constexpr size_t LOG_SHORT = 10;
-                static constexpr size_t LOG_MAX = 27;
+                static constexpr size_t LOG_SHORT = 12;
+                static constexpr size_t LOG_MAX = 23;
+                static constexpr size_t LOG_CACHE = 9;
                 static constexpr size_t SHORT_LEN = size_t(1) << LOG_SHORT;
                 static constexpr size_t MAX_LEN = size_t(1) << LOG_MAX;
-                static const TableFix<Float64, 4> table_8;
-                static const TableFix<Float64, 4> table_16_1;
-                static const TableFix<Float64, 4> table_16_3;
-                static const TableFix<Float64, 8> table_32_1;
-                static const TableFix<Float64, 8> table_32_3;
-                static const TableFixMulti<Float64, 6, LOG_SHORT, 4> multi_table_3;
-                static const TableFixMulti<Float64, 6, LOG_SHORT, 4> multi_table_2;
-                static TableFixMulti<Float64, 6, LOG_MAX, 4> multi_table_1;
-
-                static constexpr const Float64 *it8 = &table_8[0];
-                static constexpr const Float64 *it16_1 = &table_16_1[0];
-                static constexpr const Float64 *it16_3 = &table_16_3[0];
-                static constexpr const Float64 *it32_1 = &table_32_1[0];
-                static constexpr const Float64 *it32_3 = &table_32_3[0];
-
+                using TableFix4 = const TableFix<Float64, 4>;
+                using TableFix8 = const TableFix<Float64, 8>;
+                using TableMulti = const TableFixMulti<Float64, 6, LOG_SHORT, 4>;
+                using TableSqrt = const FFTTableSqrt<4, LOG_SHORT, LOG_MAX, LOG_CACHE>;
+                static TableFix4 table_8, table_16_1, table_16_3;
+                static TableFix8 table_32_1, table_32_3;
+                static TableMulti multi_table_1, multi_table_2, multi_table_3;
+                static TableSqrt sqrt_table_1;
+                static constexpr const Float64 *it8 = &table_8[0], *it16_1 = &table_16_1[0], *it16_3 = &table_16_3[0], *it32_1 = &table_32_1[0], *it32_3 = &table_32_3[0];
                 static void dif4x4(F64X4 &r0, F64X4 &i0, F64X4 &r1, F64X4 &i1, F64X4 &r2, F64X4 &i2, F64X4 &r3, F64X4 &i3)
                 {
                     transpose64_4X4(r0, r1, r2, r3);
                     transpose64_4X4(i0, i1, i2, i3);
-
                     dif4(r0, i0, r1, i1, r2, i2, r3, i3);
-
                     transpose64_4X4(r0, r1, r2, r3);
                     transpose64_4X4(i0, i1, i2, i3);
                 }
@@ -364,183 +451,132 @@ namespace hint
                 {
                     transpose64_4X4(r0, r1, r2, r3);
                     transpose64_4X4(i0, i1, i2, i3);
-
                     idit4(r0, i0, r1, i1, r2, i2, r3, i3);
-
                     transpose64_4X4(r0, r1, r2, r3);
                     transpose64_4X4(i0, i1, i2, i3);
                 }
-                static void dif8x2(C64X4 &c0, C64X4 &c1, C64X4 &c2, C64X4 &c3, const C64X4 &omega)
+                static void dif8x2(C64X4 &c0, C64X4 &c1, C64X4 &c2, C64X4 &c3)
                 {
+                    C64X4 omega(it8);
                     transform2(c0, c1);
                     transform2(c2, c3);
-                    c1 = c1.mul(omega);
-                    c3 = c3.mul(omega);
-                    FFTAVX::dif4x4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
+                    c1 = c1.mul(omega), c3 = c3.mul(omega);
+                    dif4x4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
                 }
-                static void idit8x2(C64X4 &c0, C64X4 &c1, C64X4 &c2, C64X4 &c3, const C64X4 &omega)
+                static void idit8x2(C64X4 &c0, C64X4 &c1, C64X4 &c2, C64X4 &c3)
                 {
+                    C64X4 omega(it8);
                     idit4x4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    c1 = c1.mulConj(omega);
-                    c3 = c3.mulConj(omega);
+                    c1 = c1.mulConj(omega), c3 = c3.mulConj(omega);
                     transform2(c0, c1);
                     transform2(c2, c3);
-                }
-                static void dif8x2(Float64 in_out[])
-                {
-                    C64X4 c0, c1, c2, c3, omega;
-                    c0.load(in_out), c1.load(in_out + 8), c2.load(in_out + 16), c3.load(in_out + 24), omega.load(it8);
-                    dif8x2(c0, c1, c2, c3, omega);
-                    c0.store(in_out), c1.store(in_out + 8), c2.store(in_out + 16), c3.store(in_out + 24);
-                }
-                static void idit8x2(Float64 in_out[])
-                {
-                    C64X4 c0, c1, c2, c3, omega;
-                    c0.load(in_out), c1.load(in_out + 8), c2.load(in_out + 16), c3.load(in_out + 24), omega.load(it8);
-                    idit8x2(c0, c1, c2, c3, omega);
-                    c0.store(in_out), c1.store(in_out + 8), c2.store(in_out + 16), c3.store(in_out + 24);
                 }
                 static void dif16(Float64 in_out[])
                 {
-                    C64X4 c0, c1, c2, c3, omega;
-                    c0.load(in_out), c1.load(in_out + 8), c2.load(in_out + 16), c3.load(in_out + 24);
+                    auto p = reinterpret_cast<C64X4 *>(in_out);
+                    C64X4 c0 = p[0], c1 = p[1], c2 = p[2], c3 = p[3];
                     dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    omega.load(it8), c1 = c1.mul(omega);
-                    omega.load(it16_1), c2 = c2.mul(omega);
-                    omega.load(it16_3), c3 = c3.mul(omega);
+                    c1 = c1.mul(C64X4(it8)), c2 = c2.mul(C64X4(it16_1)), c3 = c3.mul(C64X4(it16_3));
                     dif4x4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    c0.store(in_out), c1.store(in_out + 8), c2.store(in_out + 16), c3.store(in_out + 24);
+                    p[0] = c0, p[1] = c1, p[2] = c2, p[3] = c3;
                 }
                 static void idit16(Float64 in_out[])
                 {
-                    C64X4 c0, c1, c2, c3, omega;
-                    c0.load(in_out), c1.load(in_out + 8), c2.load(in_out + 16), c3.load(in_out + 24);
+                    auto p = reinterpret_cast<C64X4 *>(in_out);
+                    C64X4 c0 = p[0], c1 = p[1], c2 = p[2], c3 = p[3], omega;
                     idit4x4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    omega.load(it8), c1 = c1.mulConj(omega);
-                    omega.load(it16_1), c2 = c2.mulConj(omega);
-                    omega.load(it16_3), c3 = c3.mulConj(omega);
+                    c1 = c1.mulConj(C64X4(it8)), c2 = c2.mulConj(C64X4(it16_1)), c3 = c3.mulConj(C64X4(it16_3));
                     idit4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    c0.store(in_out), c1.store(in_out + 8), c2.store(in_out + 16), c3.store(in_out + 24);
+                    p[0] = c0, p[1] = c1, p[2] = c2, p[3] = c3;
                 }
                 static void dif32(Float64 in_out[])
                 {
-                    C64X4 c0, c1, c2, c3, omega;
-                    c0.load(in_out), c1.load(in_out + 16), c2.load(in_out + 32), c3.load(in_out + 48);
+                    auto p = reinterpret_cast<C64X4 *>(in_out);
+                    C64X4 c0 = p[0], c1 = p[2], c2 = p[4], c3 = p[6];
                     difSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    omega.load(it32_1), c2 = c2.mul(omega);
-                    omega.load(it32_3), c3 = c3.mul(omega);
-                    c0.store(in_out), c1.store(in_out + 16), c2.store(in_out + 32), c3.store(in_out + 48);
-
-                    c0.load(in_out + 8), c1.load(in_out + 24), c2.load(in_out + 40), c3.load(in_out + 56); // 1,3,5,7
+                    c2 = c2.mul(C64X4(it32_1)), c3 = c3.mul(C64X4(it32_3));
+                    p[0] = c0, p[2] = c1, p[4] = c2, p[6] = c3;
+                    c0 = p[1], c1 = p[3], c2 = p[5], c3 = p[7];
                     difSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    omega.load(it32_1 + 8), c2 = c2.mul(omega);
-                    omega.load(it32_3 + 8), c3 = c3.mul(omega);
-                    c0.store(in_out + 8), c1.store(in_out + 24);
-                    c0.load(in_out + 32), c1.load(in_out + 48), omega.load(it8); // 4,6
-                    dif8x2(c0, c2, c1, c3, omega);
-                    c0.store(in_out + 32), c2.store(in_out + 40), c1.store(in_out + 48), c3.store(in_out + 56);
+                    c2 = c2.mul(C64X4(it32_1 + 8)), c3 = c3.mul(C64X4(it32_3 + 8));
+                    p[1] = c0, p[3] = c1, c0 = p[4], c1 = p[6];
+                    dif8x2(c0, c2, c1, c3);
+                    p[4] = c0, p[5] = c2, p[6] = c1, p[7] = c3;
                     dif16(in_out);
                 }
                 static void idit32(Float64 in_out[])
                 {
-                    C64X4 c0, c1, c2, c3, omega;
                     idit16(in_out);
-                    c0.load(in_out + 32), c1.load(in_out + 40), c2.load(in_out + 48), c3.load(in_out + 56), omega.load(it8); // 4,5,6,7
-                    idit8x2(c0, c1, c2, c3, omega);
-                    c1.store(in_out + 40), c3.store(in_out + 56);
-
-                    c1.load(in_out), c3.load(in_out + 16);
-                    omega.load(it32_1), c0 = c0.mulConj(omega);
-                    omega.load(it32_3), c2 = c2.mulConj(omega);
+                    auto p = reinterpret_cast<C64X4 *>(in_out);
+                    C64X4 c0 = p[4], c1 = p[5], c2 = p[6], c3 = p[7];
+                    idit8x2(c0, c1, c2, c3);
+                    p[5] = c1, p[7] = c3, c1 = p[0], c3 = p[2];
+                    c0 = c0.mulConj(C64X4(it32_1)), c2 = c2.mulConj(C64X4(it32_3));
                     iditSplit(c1.real, c1.imag, c3.real, c3.imag, c0.real, c0.imag, c2.real, c2.imag);
-                    c1.store(in_out), c3.store(in_out + 16), c0.store(in_out + 32), c2.store(in_out + 48);
-
-                    c0.load(in_out + 8), c1.load(in_out + 24), c2.load(in_out + 40), c3.load(in_out + 56);
-                    omega.load(it32_1 + 8), c2 = c2.mulConj(omega);
-                    omega.load(it32_3 + 8), c3 = c3.mulConj(omega);
+                    p[0] = c1, p[2] = c3, p[4] = c0, p[6] = c2;
+                    c0 = p[1], c1 = p[3], c2 = p[5], c3 = p[7];
+                    c2 = c2.mulConj(C64X4(it32_1 + 8)), c3 = c3.mulConj(C64X4(it32_3 + 8));
                     iditSplit(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                    c0.store(in_out + 8), c1.store(in_out + 24), c2.store(in_out + 40), c3.store(in_out + 56);
-                }
-                static void dif16(Float64 in_out[], size_t float_len)
-                {
-                    assert(float_len >= 32);
-                    for (auto end = in_out + float_len; in_out < end; in_out += 32)
-                    {
-                        dif16(in_out);
-                    }
-                }
-                static void idit16(Float64 in_out[], size_t float_len)
-                {
-                    assert(float_len >= 32);
-                    for (auto end = in_out + float_len; in_out < end; in_out += 32)
-                    {
-                        idit16(in_out);
-                    }
-                }
-                static void dif32(Float64 in_out[], size_t float_len)
-                {
-                    assert(float_len >= 64);
-                    for (auto end = in_out + float_len; in_out < end; in_out += 64)
-                    {
-                        dif32(in_out);
-                    }
-                }
-                static void idit32(Float64 in_out[], size_t float_len)
-                {
-                    assert(float_len >= 64);
-                    for (auto end = in_out + float_len; in_out < end; in_out += 64)
-                    {
-                        idit32(in_out);
-                    }
+                    p[1] = c0, p[3] = c1, p[5] = c2, p[7] = c3;
                 }
                 static void difIter(Float64 in_out[], size_t float_len)
                 {
                     size_t fft_len = float_len / 2;
-                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     assert(fft_len <= SHORT_LEN);
                     for (size_t rank = fft_len; rank >= 64; rank /= 4)
                     {
                         const size_t stride1 = rank / 2, stride2 = stride1 * 2, stride3 = stride1 * 3;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
-                            auto table1 = multi_table_1.getBegin(rank);
-                            auto table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
+                            auto table1 = multi_table_1.getBegin(rank), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
                             auto it0 = begin, it1 = begin + stride1, it2 = begin + stride2, it3 = begin + stride3;
                             for (; it0 < begin + stride1; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
-                                C64X4 c0, c1, c2, c3, omega;
-                                c0.load(it0), c1.load(it1), c2.load(it2), c3.load(it3);
+                                C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3, omega;
                                 dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                                omega.load(table2), c1 = c1.mul(omega);
-                                omega.load(table1), c2 = c2.mul(omega);
-                                omega.load(table3), c3 = c3.mul(omega);
+                                c1 = c1.mul(C64X4(table2)), c2 = c2.mul(C64X4(table1)), c3 = c3.mul(C64X4(table3));
                                 c0.store(it0), c1.store(it1), c2.store(it2), c3.store(it3);
                             }
                         }
                     }
                     if (hint_log2(fft_len) % 2 == 0)
                     {
-                        dif16(in_out, float_len);
+                        assert(float_len >= 32);
+                        for (auto end = in_out + float_len; in_out < end; in_out += 32)
+                        {
+                            dif16(in_out);
+                        }
                     }
                     else
                     {
-                        dif32(in_out, float_len);
+                        assert(float_len >= 64);
+                        for (auto end = in_out + float_len; in_out < end; in_out += 64)
+                        {
+                            dif32(in_out);
+                        }
                     }
                 }
                 static void iditIter(Float64 in_out[], size_t float_len)
                 {
                     size_t fft_len = float_len / 2;
-                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     assert(fft_len <= SHORT_LEN);
                     size_t rank = 0;
                     if (hint_log2(fft_len) % 2 == 0)
                     {
-                        idit16(in_out, float_len);
+                        assert(float_len >= 32);
+                        for (auto end = in_out + float_len - 32; end >= in_out; end -= 32)
+                        {
+                            idit16(end);
+                        }
                         rank = 64;
                     }
                     else
                     {
-                        idit32(in_out, float_len);
+                        assert(float_len >= 64);
+                        for (auto end = in_out + float_len - 64; end >= in_out; end -= 64)
+                        {
+                            idit32(end);
+                        }
                         rank = 128;
                     }
                     for (; rank <= fft_len; rank *= 4)
@@ -548,16 +584,13 @@ namespace hint
                         const size_t stride1 = rank / 2, stride2 = stride1 * 2, stride3 = stride1 * 3;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
-                            auto table1 = multi_table_1.getBegin(rank);
-                            auto table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
+                            auto table1 = multi_table_1.getBegin(rank), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
                             auto it0 = begin, it1 = begin + stride1, it2 = begin + stride2, it3 = begin + stride3;
                             for (; it0 < begin + stride1; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
-                                C64X4 c0, c1, c2, c3, omega;
+                                C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3, omega;
                                 c0.load(it0), c1.load(it1), c2.load(it2), c3.load(it3);
-                                omega.load(table2), c1 = c1.mulConj(omega);
-                                omega.load(table1), c2 = c2.mulConj(omega);
-                                omega.load(table3), c3 = c3.mulConj(omega);
+                                c1 = c1.mulConj(C64X4(table2)), c2 = c2.mulConj(C64X4(table1)), c3 = c3.mulConj(C64X4(table3));
                                 idit4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
                                 c0.store(it0), c1.store(it1), c2.store(it2), c3.store(it3);
                             }
@@ -570,25 +603,23 @@ namespace hint
                 {
                     using FromRIRI = std::integral_constant<bool, FROM_RIRI_PERM>;
                     const size_t fft_len = float_len / 2;
-                    assert(fft_len <= MAX_LEN);
-                    if (fft_len <= SHORT_LEN)
+                    if ((!FROM_RIRI_PERM) && fft_len <= SHORT_LEN)
                     {
                         difIter(in_out, float_len);
-                        assert(!FROM_RIRI_PERM);
                         return;
                     }
-                    multi_table_1.initBottomUp(hint_log2(fft_len));
+                    const auto &table1 = sqrt_table_1[hint_log2(fft_len)];
+                    size_t indx = 0;
                     const size_t stride1 = float_len / 4, stride2 = stride1 * 2, stride3 = stride1 * 3;
-                    auto table1 = multi_table_1.getBegin(fft_len);
-                    for (auto end = in_out + stride1, it = in_out; it < end; it += 8, table1 += 8)
+                    for (auto end = in_out + stride1, it = in_out; it < end; it += 8, indx++)
                     {
-                        C64X4 c0, c1, c2, c3, omega, omega2;
+                        C64X4 c0, c1, c2, c3, omega1, omega2;
                         c0.load(it, FromRIRI{}), c1.load(it + stride1, FromRIRI{}), c2.load(it + stride2, FromRIRI{}), c3.load(it + stride3, FromRIRI{});
                         c2.load(it + stride2, FromRIRI{}), c3.load(it + stride3, FromRIRI{});
                         dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
-                        omega.load(table1), c2 = c2.mul(omega);
-                        omega2 = omega.square(), c1 = c1.mul(omega2);
-                        c3 = c3.mul(omega2.mul(omega));
+                        omega1 = table1[indx], c2 = c2.mul(omega1);
+                        omega2 = omega1.square(), c1 = c1.mul(omega2);
+                        omega1 = omega1.mul(omega2), c3 = c3.mul(omega1);
                         c0.store(it), c1.store(it + stride1), c2.store(it + stride2), c3.store(it + stride3);
                     }
                     difRecRadix4(in_out, stride1);
@@ -600,15 +631,11 @@ namespace hint
                 static void iditRecRadix4(Float64 in_out[], size_t float_len)
                 {
                     const size_t fft_len = float_len / 2;
-                    assert(fft_len <= MAX_LEN);
-                    if (fft_len <= SHORT_LEN)
+                    if ((!TO_RIRI_PERM) && (!TO_INT64) && fft_len <= SHORT_LEN)
                     {
                         iditIter(in_out, float_len);
-                        assert(!TO_RIRI_PERM);
-                        assert(!TO_INT64);
                         return;
                     }
-                    multi_table_1.initBottomUp(hint_log2(fft_len));
                     using ToRIRI = std::integral_constant<bool, TO_RIRI_PERM>;
                     using ToI64 = std::integral_constant<bool, TO_INT64>;
                     const size_t stride1 = float_len / 4, stride2 = stride1 * 2, stride3 = stride1 * 3;
@@ -616,14 +643,15 @@ namespace hint
                     iditRecRadix4(in_out + stride1, stride1);
                     iditRecRadix4(in_out + stride2, stride1);
                     iditRecRadix4(in_out + stride3, stride1);
-                    auto table1 = multi_table_1.getBegin(fft_len);
-                    for (auto end = in_out + stride1, it = in_out; it < end; it += 8, table1 += 8)
+                    const auto &table1 = sqrt_table_1[hint_log2(fft_len)];
+                    size_t indx = 0;
+                    for (auto end = in_out + stride1, it = in_out; it < end; it += 8, indx++)
                     {
-                        C64X4 c0, c1, c2, c3, omega, omega2;
+                        C64X4 c0, c1, c2, c3, omega1, omega2;
                         c0.load(it), c1.load(it + stride1), c2.load(it + stride2), c3.load(it + stride3);
-                        omega.load(table1), c2 = c2.mulConj(omega);
-                        omega2 = omega.square(), c1 = c1.mulConj(omega2);
-                        c3 = c3.mulConj(omega2.mul(omega));
+                        omega1 = table1[indx], c2 = c2.mulConj(omega1);
+                        omega2 = omega1.square(), c1 = c1.mulConj(omega2);
+                        omega1 = omega1.mul(omega2), c3 = c3.mulConj(omega1);
                         idit4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
                         c0 = c0.transToI64(ToI64{}), c1 = c1.transToI64(ToI64{}), c2 = c2.transToI64(ToI64{}), c3 = c3.transToI64(ToI64{});
                         c0.store(it, ToRIRI{}), c1.store(it + stride1, ToRIRI{}), c2.store(it + stride2, ToRIRI{}), c3.store(it + stride3, ToRIRI{});
@@ -634,21 +662,10 @@ namespace hint
             constexpr size_t FFTAVX::LOG_MAX;
             constexpr size_t FFTAVX::SHORT_LEN;
             constexpr size_t FFTAVX::MAX_LEN;
-
-            const TableFix<Float64, 4> FFTAVX::table_8(8, 1, 4);
-            const TableFix<Float64, 4> FFTAVX::table_16_1(16, 1, 4);
-            const TableFix<Float64, 4> FFTAVX::table_16_3(16, 3, 4);
-            const TableFix<Float64, 8> FFTAVX::table_32_1(32, 1, 4);
-            const TableFix<Float64, 8> FFTAVX::table_32_3(32, 3, 4);
-            const TableFixMulti<Float64, 6, FFTAVX::LOG_SHORT, 4> FFTAVX::multi_table_3(3);
-            const TableFixMulti<Float64, 6, FFTAVX::LOG_SHORT, 4> FFTAVX::multi_table_2(2);
-            TableFixMulti<Float64, 6, FFTAVX::LOG_MAX, 4> FFTAVX::multi_table_1(1, 4, false);
-
-            constexpr const Float64 *FFTAVX::it8;
-            constexpr const Float64 *FFTAVX::it16_1;
-            constexpr const Float64 *FFTAVX::it16_3;
-            constexpr const Float64 *FFTAVX::it32_1;
-            constexpr const Float64 *FFTAVX::it32_3;
+            FFTAVX::TableFix4 FFTAVX::table_8(8, 1, 4), FFTAVX::table_16_1(16, 1, 4), FFTAVX::table_16_3(16, 3, 4);
+            FFTAVX::TableFix8 FFTAVX::table_32_1(32, 1, 4), FFTAVX::table_32_3(32, 3, 4);
+            FFTAVX::TableMulti FFTAVX::multi_table_1(1), FFTAVX::multi_table_2(2), FFTAVX::multi_table_3(3);
+            FFTAVX::TableSqrt FFTAVX::sqrt_table_1(1);
 
             constexpr uint32_t bitrev32(uint32_t n)
             {

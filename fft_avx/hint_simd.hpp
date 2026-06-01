@@ -409,6 +409,11 @@ namespace hint_simd
             real.load1(real_p);
             imag.load1(imag_p);
         }
+        void set1(F64 real_in, F64 imag_in)
+        {
+            real = F64X4(real_in);
+            imag = F64X4(imag_in);
+        }
 
         template <typename T>
         void store(T *p, std::false_type) const
