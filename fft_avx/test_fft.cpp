@@ -202,7 +202,10 @@ inline std::vector<T> poly_multiply(const std::vector<T> &in1, const std::vector
     std::copy(in2.begin(), in2.end(), p2);
     std::fill(p1 + len1, p1 + float_len, 0);
     std::fill(p2 + len2, p2 + float_len, 0);
+    auto t1 = std::chrono::steady_clock::now();
     hint::transform::fft::real_conv_avx<true>(p1, p2, float_len);
+    auto t2 = std::chrono::steady_clock::now();
+    std::cout << "Cost time: " << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
     auto i64_p = reinterpret_cast<uint64_t *>(p1);
     std::vector<T> res(conv_len);
     for (size_t i = 0; i < conv_len; i++)

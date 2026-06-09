@@ -486,10 +486,10 @@ namespace hint_simd
         C64X4 transToI64(std::true_type) const
         {
             constexpr int64_t F1_2 = 4602678819172646912; // magic::bit_cast<int64_t>(0.5);
-            auto F1_2X4 = F64X4(__m256d(_mm256_set1_epi64x(F1_2)));
+            auto F1_2X4 = F64X4(_mm256_castsi256_pd(_mm256_set1_epi64x(F1_2)));
             auto real_i64 = (real + F1_2X4).toI64X4();
             auto imag_i64 = (imag + F1_2X4).toI64X4();
-            return C64X4(__m256d(real_i64), __m256d(imag_i64));
+            return C64X4(_mm256_castsi256_pd(real_i64), _mm256_castsi256_pd(imag_i64));
         }
 
         F64X4 real, imag;
