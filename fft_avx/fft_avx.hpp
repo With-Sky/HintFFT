@@ -74,7 +74,7 @@ namespace hint
     constexpr int hint_ctz(uint32_t x)
     {
         int r0 = 31;
-        x &= (0-x);
+        x &= (0 - x);
         if (x & 0x55555555)
         {
             r0 &= ~1;
@@ -102,7 +102,7 @@ namespace hint
     constexpr int hint_ctz(uint64_t x)
     {
         int r0 = 63;
-        x &= (0-x);
+        x &= (0 - x);
         if (x & 0x5555555555555555)
         {
             r0 &= ~1; // -1
@@ -545,12 +545,12 @@ namespace hint
                     assert(fft_len <= SHORT_LEN);
                     for (size_t rank = fft_len; rank >= 64; rank /= 4)
                     {
-                        const size_t stride1 = rank / 2, stride2 = stride1 * 2, stride3 = stride1 * 3;
+                        const size_t stride = rank / 2;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
                             auto table1 = multi_table_2.getBegin(rank * 2), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
-                            auto it0 = begin, it1 = begin + stride1, it2 = begin + stride2, it3 = begin + stride3;
-                            for (; it0 < begin + stride1; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
+                            auto it0 = begin, it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                            for (; it0 < begin + stride; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
                                 C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3;
                                 dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
@@ -569,12 +569,12 @@ namespace hint
                     fftTiny(in_out, float_len, idit32, idit16);
                     for (; rank <= fft_len; rank *= 4)
                     {
-                        const size_t stride1 = rank / 2, stride2 = stride1 * 2, stride3 = stride1 * 3;
+                        const size_t stride = rank / 2;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
                             auto table1 = multi_table_2.getBegin(rank * 2), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
-                            auto it0 = begin, it1 = begin + stride1, it2 = begin + stride2, it3 = begin + stride3;
-                            for (; it0 < begin + stride1; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
+                            auto it0 = begin, it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                            for (; it0 < begin + stride; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
                                 C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3;
                                 c1 = c1.mulConj(C64X4(table2)), c2 = c2.mulConj(C64X4(table1)), c3 = c3.mulConj(C64X4(table3));
