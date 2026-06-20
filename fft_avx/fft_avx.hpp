@@ -424,7 +424,7 @@ namespace hint
             };
             struct FFTAVX : public FFT
             {
-                static constexpr int LOG_SHORT = 10, LOG_MID = 16, LOG_MAX = 28, LOG_CACHE = 8;
+                static constexpr int LOG_SHORT = 12, LOG_MID = 16, LOG_MAX = 28, LOG_CACHE = 8;
                 static constexpr size_t SHORT_LEN = size_t(1) << LOG_SHORT, MID_LEN = size_t(1) << LOG_MID, MAX_LEN = size_t(1) << LOG_MAX;
                 using TableFix4 = const TableFix<Float64, 4>;
                 using TableFix8 = const TableFix<Float64, 8>;
@@ -539,20 +539,33 @@ namespace hint
                         }
                     }
                 }
+                template <bool FROM_RIRI_PERM = false>
                 static void difIter(Float64 in_out[], size_t float_len)
                 {
                     size_t fft_len = float_len / 2;
                     assert(fft_len <= SHORT_LEN);
-                    for (size_t rank = fft_len; rank >= 64; rank /= 4)
+                    using FromRIRI = std::integral_constant<bool, FROM_RIRI_PERM>;
+                    C64X4 c0, c1, c2, c3;
+                    size_t stride = fft_len / 2;
+                    auto table1 = multi_table_2.getBegin(fft_len * 2), table2 = multi_table_2.getBegin(fft_len), table3 = multi_table_3.getBegin(fft_len);
+                    auto it0 = in_out, it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                    for (auto end = it1; it0 < end; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                     {
-                        const size_t stride = rank / 2;
+                        c0.load(it0, FromRIRI{}), c1.load(it1, FromRIRI{}), c2.load(it2, FromRIRI{}), c3.load(it3, FromRIRI{});
+                        dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
+                        c1 = c1.mul(C64X4(table2)), c2 = c2.mul(C64X4(table1)), c3 = c3.mul(C64X4(table3));
+                        c0.store(it0), c1.store(it1), c2.store(it2), c3.store(it3);
+                    }
+                    for (size_t rank = fft_len / 4; rank >= 64; rank /= 4)
+                    {
+                        stride = rank / 2;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
                         {
-                            auto table1 = multi_table_2.getBegin(rank * 2), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
-                            auto it0 = begin, it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                            table1 = multi_table_2.getBegin(rank * 2), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
+                            it0 = begin, it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
                             for (; it0 < begin + stride; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
                             {
-                                C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3;
+                                c0 = it0, c1 = it1, c2 = it2, c3 = it3;
                                 dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
                                 c1 = c1.mul(C64X4(table2)), c2 = c2.mul(C64X4(table1)), c3 = c3.mul(C64X4(table3));
                                 c0.store(it0), c1.store(it1), c2.store(it2), c3.store(it3);
@@ -561,13 +574,14 @@ namespace hint
                     }
                     fftTiny(in_out, float_len, dif32, dif16);
                 }
+                template <bool TO_RIRI_PERM = false, bool TO_INT64 = false>
                 static void iditIter(Float64 in_out[], size_t float_len)
                 {
                     size_t fft_len = float_len / 2;
                     assert(fft_len <= SHORT_LEN);
                     size_t rank = hint_log2(fft_len) % 2 == 0 ? 64 : 128;
                     fftTiny(in_out, float_len, idit32, idit16);
-                    for (; rank <= fft_len; rank *= 4)
+                    for (; rank <= fft_len / 4; rank *= 4)
                     {
                         const size_t stride = rank / 2;
                         for (auto begin = in_out, end = in_out + float_len; begin < end; begin += rank * 2)
@@ -582,6 +596,19 @@ namespace hint
                                 c0.store(it0), c1.store(it1), c2.store(it2), c3.store(it3);
                             }
                         }
+                    }
+                    using ToRIRI = std::integral_constant<bool, TO_RIRI_PERM>;
+                    using ToI64 = std::integral_constant<bool, TO_INT64>;
+                    const size_t stride = rank / 2;
+                    auto table1 = multi_table_2.getBegin(rank * 2), table2 = multi_table_2.getBegin(rank), table3 = multi_table_3.getBegin(rank);
+                    auto it0 = in_out, it1 = it0 + stride, it2 = it1 + stride, it3 = it2 + stride;
+                    for (auto end = it1; it0 < end; it0 += 8, it1 += 8, it2 += 8, it3 += 8, table1 += 8, table2 += 8, table3 += 8)
+                    {
+                        C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3;
+                        c1 = c1.mulConj(C64X4(table2)), c2 = c2.mulConj(C64X4(table1)), c3 = c3.mulConj(C64X4(table3));
+                        idit4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);
+                        c0 = c0.transToI64(ToI64{}), c1 = c1.transToI64(ToI64{}), c2 = c2.transToI64(ToI64{}), c3 = c3.transToI64(ToI64{});
+                        c0.store(it0, ToRIRI{}), c1.store(it1, ToRIRI{}), c2.store(it2, ToRIRI{}), c3.store(it3, ToRIRI{});
                     }
                 }
 
@@ -631,9 +658,9 @@ namespace hint
                 static void difRecMid(Float64 in_out[], size_t float_len)
                 {
                     const size_t fft_len = float_len / 2;
-                    if ((!FROM_RIRI_PERM) && fft_len <= SHORT_LEN)
+                    if (fft_len <= SHORT_LEN)
                     {
-                        difIter(in_out, float_len);
+                        difIter<FROM_RIRI_PERM>(in_out, float_len);
                         return;
                     }
                     using FromRIRI = std::integral_constant<bool, FROM_RIRI_PERM>;
@@ -645,9 +672,9 @@ namespace hint
                 static void iditRecMid(Float64 in_out[], size_t float_len)
                 {
                     const size_t fft_len = float_len / 2;
-                    if ((!TO_RIRI_PERM) && (!TO_INT64) && fft_len <= SHORT_LEN)
+                    if (fft_len <= SHORT_LEN)
                     {
-                        iditIter(in_out, float_len);
+                        iditIter<TO_RIRI_PERM, TO_INT64>(in_out, float_len);
                         return;
                     }
                     using ToRIRI = std::integral_constant<bool, TO_RIRI_PERM>;
@@ -716,32 +743,36 @@ namespace hint
                 return bitrev32(n) >> (32 - len);
             }
 
+            template <int MAX_LOG_LEN, int DIV>
             class BinRevTableC64X4HP
             {
             public:
-                using F64 = double;
-                using C64 = std::complex<F64>;
-                using C64X4 = hint_simd::Complex64X4;
-                static constexpr int MAX_LOG_LEN = 32, LOG_BLOCK = 2, BLOCK = 1 << LOG_BLOCK;
+                static constexpr int LOG_BLOCK = 2, BLOCK = 1 << LOG_BLOCK;
                 static constexpr size_t MAX_LEN = size_t(1) << MAX_LOG_LEN;
 
-                BinRevTableC64X4HP(int log_max_iter_in, int log_fft_len_in)
-                    : index(0), pop(0), log_max_iter(log_max_iter_in), log_fft_len(log_fft_len_in)
+                struct Unit
                 {
-                    assert(log_max_iter <= log_fft_len);
-                    assert(log_fft_len <= MAX_LOG_LEN);
-                    const F64 factor = F64(1) / (size_t(1) << (log_fft_len - log_max_iter));
-                    for (int i = 0; i < MAX_LOG_LEN; i++)
+                    C64 units[MAX_LOG_LEN]{};
+                    F64 block[BLOCK * 2]{};
+                    Unit()
                     {
-                        units[i] = getOmega(size_t(1) << (i + 1), 1, factor);
+                        constexpr F64 factor = F64(1) / DIV;
+                        for (int i = 0; i < MAX_LOG_LEN; i++)
+                        {
+                            units[i] = getOmega(size_t(1) << (i + 1), 1, factor);
+                        }
+                        block[0] = 1, block[BLOCK] = 0;
+                        for (int i = 1; i < BLOCK; i++)
+                        {
+                            C64 omega = getOmega(BLOCK, bitrev(i, LOG_BLOCK), factor);
+                            block[i] = omega.real(), block[i + BLOCK] = omega.imag();
+                        }
                     }
-                    auto fp = reinterpret_cast<F64 *>(table);
-                    fp[0] = 1, fp[BLOCK] = 0;
-                    for (int i = 1; i < BLOCK; i++)
-                    {
-                        C64 omega = getOmega(BLOCK, bitrev(i, LOG_BLOCK), factor);
-                        fp[i] = omega.real(), fp[i + BLOCK] = omega.imag();
-                    }
+                };
+
+                BinRevTableC64X4HP() : index(0), pop(0)
+                {
+                    std::memcpy(table, unit_table.block, sizeof(unit_table.block));
                 }
 
                 // Only for power of 2
@@ -756,7 +787,7 @@ namespace hint
                     assert(i % BLOCK == 0);
                     pop = 1, index = i / BLOCK;
                     int zero = hint_ctz(index);
-                    auto fp = reinterpret_cast<F64 *>(&units[zero + 2]);
+                    auto fp = reinterpret_cast<const F64 *>(&unit_table.units[zero + 2]);
                     table[1].load1(fp, fp + 1);
                     table[1] = table[1].mul(table[0]);
                 }
@@ -764,8 +795,8 @@ namespace hint
                 {
                     C64X4 res = table[pop], unit4;
                     index++;
-                    int zero = hint_ctz(index);
-                    auto fp = reinterpret_cast<F64 *>(&units[zero + 2]);
+                    int zero = __builtin_ctzll(index);
+                    auto fp = reinterpret_cast<const F64 *>(&unit_table.units[zero + 2]);
                     unit4.load1(fp, fp + 1);
                     pop -= zero;
                     table[pop + 1] = table[pop].mul(unit4);
@@ -780,22 +811,27 @@ namespace hint
                 }
 
             private:
-                C64 units[MAX_LOG_LEN]{};
-                C64X4 table[MAX_LOG_LEN]{};
+                alignas(64) static const Unit unit_table;
+                alignas(64) C64X4 table[MAX_LOG_LEN];
                 size_t index;
                 int pop;
                 int log_max_iter, log_fft_len;
             };
+            template <int MAX_LOG_LEN, int DIV>
+            const typename BinRevTableC64X4HP<MAX_LOG_LEN, DIV>::Unit BinRevTableC64X4HP<MAX_LOG_LEN, DIV>::unit_table;
+
             template <size_t RI_DIFF = 1, typename FloatTy>
             inline void dot_rfft(FloatTy *inout0, FloatTy *inout1, const FloatTy *in0, const FloatTy *in1,
                                  const std::complex<FloatTy> &omega0, const FloatTy factor = 1)
             {
                 using Complex = std::complex<FloatTy>;
+                // -j * c0 * c1
                 auto mul1 = [](Complex c0, Complex c1)
                 {
                     return Complex(c0.imag() * c1.real() + c0.real() * c1.imag(),
                                    c0.imag() * c1.imag() - c0.real() * c1.real());
                 };
+                //  j * c0 * conj(c1)
                 auto mul2 = [](Complex c0, Complex c1)
                 {
                     return Complex(c0.real() * c1.imag() - c0.imag() * c1.real(),
@@ -856,6 +892,61 @@ namespace hint
                     compute2(c0, c1, c0, c1, mul2);
                 }
                 c0.store(inout0), c1.reverse().store(inout1);
+            }
+            inline void dot_rfftX4X(F64 *inout0, F64 *inout1, const F64 *in0, const F64 *in1, const C64X4 &omega0, const F64X4 &inv)
+            {
+                // 1. 并行加载数据。
+                // 在频域共轭对称特性中，尾部指针是逆向移动的，因此使用 reverse() 对齐数据
+                C64X4 A, B_rev, C, D_rev;
+                A.load(inout0);
+                B_rev.load(inout1);
+                B_rev = B_rev.reverse();
+
+                C.load(in0);
+                D_rev.load(in1);
+                D_rev = D_rev.reverse();
+
+                // 2. 核心 3 次纯数据复数乘法
+                // T1 = A * C
+                C64X4 T1 = A.mul(C);
+
+                // T2 = conj(B) * conj(D) = conj(B * D)
+                C64X4 T2 = B_rev.mul(D_rev);
+
+                // T3 = (A + conj(B)) * (C + conj(D))
+                C64X4 S1(A.real + B_rev.real, A.imag - B_rev.imag);
+                C64X4 S2(C.real + D_rev.real, C.imag - D_rev.imag);
+                C64X4 T3 = S1.mul(S2);
+
+                // 3. Karatsuba 中间项无乘法递推: M12 = 2 * (T1 + T2) - T3
+                // 直接用向量加法代替乘 2，速度最快
+                F64X4 T12_r = T1.real + T2.real;
+                F64X4 T12_i = T1.imag - T2.imag;
+                C64X4 M12(T12_r + T12_r - T3.real, T12_i + T12_i - T3.imag);
+
+                // 4. 提取旋转因子平方并执行第 4 次乘法
+                // D12 = -M12 * omega0^2
+                C64X4 omega2 = omega0.square();
+                C64X4 D12 = M12.mul(omega2);
+
+                // 5. 组合打包输出结果
+                // 缩放因子准备 (利用加法快速翻倍)
+                F64X4 inv2 = inv + inv;
+                F64X4 inv4 = inv2 + inv2;
+
+                // U = 2 * inv * (T3 + D12)
+                C64X4 U((T3.real - D12.real) * inv2, (T3.imag - D12.imag) * inv2);
+
+                // W = 4 * inv * (T1 - T2)
+                C64X4 W((T1.real - T2.real) * inv4, (T1.imag + T2.imag) * inv4);
+
+                // 6. 输出重组: out0 = U + W, out1 = conj(U - W)
+                C64X4 out0(U.real + W.real, U.imag + W.imag);
+                C64X4 out1(U.real - W.real, W.imag - U.imag);
+
+                // 7. 写回内存 (注意 out1 需要再次反转恢复原本的内存布局)
+                out0.store(inout0);
+                out1.reverse().store(inout1);
             }
 
             // inv = 1 / float_len in AVX function
@@ -937,13 +1028,14 @@ namespace hint
                 real_dot_binrev<4>(in_out, in, 16, inv);
                 inv = 0.25 / float_len;
                 const Float64X4 inv4 = F64X4(inv);
-                BinRevTableC64X4HP table(31, 32);
+                BinRevTableC64X4HP<32, 2> table;
                 for (size_t begin = 16; begin < float_len; begin *= 2)
                 {
                     table.reset(begin / 2);
                     auto it0 = in_out + begin, it1 = it0 + begin - 8, it2 = in + begin, it3 = it2 + begin - 8;
                     for (; it0 < it1; it0 += 8, it1 -= 8, it2 += 8, it3 -= 8)
                     {
+                        // dot_rfftX4(it0, it1, it2, it3, C64X4(inv4, inv4), inv4);
                         dot_rfftX4(it0, it1, it2, it3, table.iterate(), inv4);
                     }
                 }

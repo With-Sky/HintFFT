@@ -203,7 +203,10 @@ inline std::vector<T> poly_multiply(const std::vector<T> &in1, const std::vector
     std::fill(p1 + len1, p1 + float_len, 0);
     std::fill(p2 + len2, p2 + float_len, 0);
     auto t1 = std::chrono::steady_clock::now();
-    hint::transform::fft::real_conv_avx<true>(p1, p2, float_len);
+    // for (int i = 0; i < 1000000; i++)
+    {
+        hint::transform::fft::real_conv_avx<true>(p1, p2, float_len);
+    }
     auto t2 = std::chrono::steady_clock::now();
     std::cout << "Cost time: " << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
     auto i64_p = reinterpret_cast<uint64_t *>(p1);
@@ -270,8 +273,26 @@ void perf_conv()
     result_test<uint64_t>(res, ele1, ele2); // 结果校验
     std::cout << "Cost time: " << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
 }
+
+void perf_iter()
+{
+    static double arr[1 << 23];
+    int n = 13;
+    std::cin >> n;
+    size_t len = size_t(1) << n; // 变换长度
+    std::cout << "conv len:" << len << "\n";
+    auto t1 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 1000000; i++)
+    {
+        hint::transform::fft::FFTAVX::difRecLong<true>(arr, len);
+    }
+    auto t2 = std::chrono::steady_clock::now();
+    std::cout << "Cost time: " << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
+}
+
 int main()
 {
     // mul(); // 计算大数乘法
     perf_conv(); // 卷积性能测试
+    // perf_iter(); // 迭代法性能测试
 }

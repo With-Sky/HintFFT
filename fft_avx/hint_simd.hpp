@@ -335,7 +335,7 @@ namespace hint_simd
         using C64X4 = Complex64X4;
         using F64X4 = Float64X4;
         using F64 = double;
-        Complex64X4() {}
+        Complex64X4() = default;
         Complex64X4(F64X4 real, F64X4 imag) : real(real), imag(imag) {}
         Complex64X4(const F64 *p) : real(p), imag(p + 4) {}
         Complex64X4(const F64 *p_real, const F64 *p_imag) : real(p_real), imag(p_imag) {}
