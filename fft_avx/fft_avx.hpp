@@ -623,7 +623,7 @@ namespace hint
             c0.load(it0, FromRIRI{}), c1.load(it1, FromRIRI{}), c2.load(it2, FromRIRI{}), c3.load(it3, FromRIRI{}); \
             dif4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);                           \
             omega1 = table[indx], c2 = c2.mul(omega1);                                                              \
-            omega2 = omega1.square(), c1 = c1.mul(omega2);                                                          \
+            omega2 = omega1.mul(omega1), c1 = c1.mul(omega2);                                                       \
             c3 = c3.mul(omega2.mul(omega1));                                                                        \
             c0.store(it0), c1.store(it1), c2.store(it2), c3.store(it3);                                             \
         }                                                                                                           \
@@ -646,7 +646,7 @@ namespace hint
         {                                                                                                                       \
             C64X4 c0 = it0, c1 = it1, c2 = it2, c3 = it3, omega1, omega2;                                                       \
             omega1 = table[indx], c2 = c2.mulConj(omega1);                                                                      \
-            omega2 = omega1.square(), c1 = c1.mulConj(omega2);                                                                  \
+            omega2 = omega1.mul(omega1), c1 = c1.mulConj(omega2);                                                               \
             c3 = c3.mulConj(omega2.mul(omega1));                                                                                \
             idit4(c0.real, c0.imag, c1.real, c1.imag, c2.real, c2.imag, c3.real, c3.imag);                                      \
             c0 = c0.transToI64(ToI64{}), c1 = c1.transToI64(ToI64{}), c2 = c2.transToI64(ToI64{}), c3 = c3.transToI64(ToI64{}); \
@@ -822,7 +822,7 @@ namespace hint
 
             template <size_t RI_DIFF = 1, typename FloatTy>
             inline void dot_rfft(FloatTy *inout0, FloatTy *inout1, const FloatTy *in0, const FloatTy *in1,
-                                 const std::complex<FloatTy> &omega0, const FloatTy factor = 1)
+                                 const std::complex<FloatTy> &omega, const FloatTy factor = 1)
             {
                 using Complex = std::complex<FloatTy>;
                 // -j * c0 * c1
@@ -837,11 +837,11 @@ namespace hint
                     return Complex(c0.real() * c1.imag() - c0.imag() * c1.real(),
                                    c0.real() * c1.real() + c0.imag() * c1.imag());
                 };
-                auto compute2 = [&omega0](Complex in0, Complex in1, Complex &out0, Complex &out1, auto Func)
+                auto compute2 = [&omega](Complex in0, Complex in1, Complex &out0, Complex &out1, auto Func)
                 {
                     in1 = std::conj(in1);
                     transform2(in0, in1);
-                    in1 = Func(in1, omega0);
+                    in1 = Func(in1, omega);
                     out0 = in0 + in1;
                     out1 = std::conj(in0 - in1);
                 };
@@ -849,9 +849,9 @@ namespace hint
                 {
                     Complex x0, x1, x2, x3;
                     c0.real(inout0[0]), c0.imag(inout0[RI_DIFF]), c1.real(inout1[0]), c1.imag(inout1[RI_DIFF]);
-                    compute2(c0, c1, x0, x1, mul1);
+                    compute2(c0, c1, x0, x1, mul1); // x0 = A + conj(B) + (A - conj(B))*w*-j, x1 = conj(A + conj(B) - (A - conj(B))*w*-j)
                     c0.real(in0[0]), c0.imag(in0[RI_DIFF]), c1.real(in1[0]), c1.imag(in1[RI_DIFF]);
-                    compute2(c0, c1, x2, x3, mul1);
+                    compute2(c0, c1, x2, x3, mul1); // x2 = C + conj(D) + (C - conj(D))*w*-j, x3 = conj(C + conj(D) - (C - conj(D))*w*-j)
                     x0 *= x2 * factor;
                     x1 *= x3 * factor;
                     compute2(x0, x1, c0, c1, mul2);
@@ -859,94 +859,25 @@ namespace hint
                 inout0[0] = c0.real(), inout0[RI_DIFF] = c0.imag();
                 inout1[0] = c1.real(), inout1[RI_DIFF] = c1.imag();
             }
-            inline void dot_rfftX4(F64 *inout0, F64 *inout1, const F64 *in0, const F64 *in1, const C64X4 &omega0, const F64X4 &inv)
+            // inv = 0.5 / float_len
+            inline void dot_rfftX4(F64 *inout0, F64 *inout1, const F64 *in0, const F64 *in1, const C64X4 &omega, const F64X4 &inv)
             {
-                auto mul1 = [](C64X4 c0, C64X4 c1)
+                auto plusConj = [](const C64X4 &x0, const C64X4 &x1)
                 {
-                    return C64X4(F64X4::fmadd(c0.imag, c1.real, c0.real * c1.imag),
-                                 F64X4::fmsub(c0.imag, c1.imag, c0.real * c1.real));
+                    return C64X4(x0.real + x1.real, x0.imag - x1.imag);
                 };
-                auto mul2 = [](C64X4 c0, C64X4 c1)
-                {
-                    return C64X4(F64X4::fmsub(c0.real, c1.imag, c0.imag * c1.real),
-                                 F64X4::fmadd(c0.real, c1.real, c0.imag * c1.imag));
-                };
-                auto compute2 = [&omega0](C64X4 c0, C64X4 c1, C64X4 &out0, C64X4 &out1, auto Func)
-                {
-                    C64X4 t0(c0.real + c1.real, c0.imag - c1.imag), t1(c0.real - c1.real, c0.imag + c1.imag);
-                    t1 = Func(t1, omega0);
-                    out0 = t0 + t1;
-                    out1.real = t0.real - t1.real;
-                    out1.imag = t1.imag - t0.imag;
-                };
-                C64X4 c0, c1;
-                {
-                    C64X4 x0, x1, x2, x3;
-                    c0.load(inout0), c1.load(inout1);
-                    compute2(c0, c1.reverse(), x0, x1, mul1);
-
-                    c0.load(in0), c1.load(in1);
-                    compute2(c0, c1.reverse(), x2, x3, mul1);
-                    c0 = x0.mul(x2) * inv;
-                    c1 = x1.mul(x3) * inv;
-                    compute2(c0, c1, c0, c1, mul2);
-                }
-                c0.store(inout0), c1.reverse().store(inout1);
-            }
-            inline void dot_rfftX4X(F64 *inout0, F64 *inout1, const F64 *in0, const F64 *in1, const C64X4 &omega0, const F64X4 &inv)
-            {
-                // 1. 并行加载数据。
-                // 在频域共轭对称特性中，尾部指针是逆向移动的，因此使用 reverse() 对齐数据
-                C64X4 A, B_rev, C, D_rev;
-                A.load(inout0);
-                B_rev.load(inout1);
-                B_rev = B_rev.reverse();
-
-                C.load(in0);
-                D_rev.load(in1);
-                D_rev = D_rev.reverse();
-
-                // 2. 核心 3 次纯数据复数乘法
-                // T1 = A * C
-                C64X4 T1 = A.mul(C);
-
-                // T2 = conj(B) * conj(D) = conj(B * D)
-                C64X4 T2 = B_rev.mul(D_rev);
-
-                // T3 = (A + conj(B)) * (C + conj(D))
-                C64X4 S1(A.real + B_rev.real, A.imag - B_rev.imag);
-                C64X4 S2(C.real + D_rev.real, C.imag - D_rev.imag);
-                C64X4 T3 = S1.mul(S2);
-
-                // 3. Karatsuba 中间项无乘法递推: M12 = 2 * (T1 + T2) - T3
-                // 直接用向量加法代替乘 2，速度最快
-                F64X4 T12_r = T1.real + T2.real;
-                F64X4 T12_i = T1.imag - T2.imag;
-                C64X4 M12(T12_r + T12_r - T3.real, T12_i + T12_i - T3.imag);
-
-                // 4. 提取旋转因子平方并执行第 4 次乘法
-                // D12 = -M12 * omega0^2
-                C64X4 omega2 = omega0.square();
-                C64X4 D12 = M12.mul(omega2);
-
-                // 5. 组合打包输出结果
-                // 缩放因子准备 (利用加法快速翻倍)
-                F64X4 inv2 = inv + inv;
-                F64X4 inv4 = inv2 + inv2;
-
-                // U = 2 * inv * (T3 + D12)
-                C64X4 U((T3.real - D12.real) * inv2, (T3.imag - D12.imag) * inv2);
-
-                // W = 4 * inv * (T1 - T2)
-                C64X4 W((T1.real - T2.real) * inv4, (T1.imag + T2.imag) * inv4);
-
-                // 6. 输出重组: out0 = U + W, out1 = conj(U - W)
-                C64X4 out0(U.real + W.real, U.imag + W.imag);
-                C64X4 out1(U.real - W.real, W.imag - U.imag);
-
-                // 7. 写回内存 (注意 out1 需要再次反转恢复原本的内存布局)
-                out0.store(inout0);
-                out1.reverse().store(inout1);
+                C64X4 x0 = inout0, x1 = inout1, y0 = in0, y1 = in1;
+                x1 = x1.reverse();
+                y1 = y1.reverse();
+                C64X4 t0 = x0.mul(y0), t1 = x1.mul(y1);
+                C64X4 xy0 = plusConj(x0, x1), xy1 = plusConj(y0, y1);
+                C64X4 t2 = xy0.mul(xy1);
+                y1 = plusConj(t0, t1); // x0 * y0 + conj(x1 * y1)
+                x1 = (y1 + y1 - t2).mul(omega);
+                const F64X4 inv2 = inv + inv;
+                x0 = (t2 - x1) * inv, x1 = C64X4((t0.real - t1.real) * inv2, (t0.imag + t1.imag) * inv2);
+                C64X4 out0 = x0 + x1, out1(x0.real - x1.real, x1.imag - x0.imag);
+                out0.store(inout0), out1.reverse().store(inout1);
             }
 
             // inv = 1 / float_len in AVX function
@@ -1026,16 +957,15 @@ namespace hint
                 using Complex = std::complex<Float64>;
                 Float64 inv = 1.0 / float_len;
                 real_dot_binrev<4>(in_out, in, 16, inv);
-                inv = 0.25 / float_len;
+                inv = 0.5 / float_len;
                 const Float64X4 inv4 = F64X4(inv);
-                BinRevTableC64X4HP<32, 2> table;
+                BinRevTableC64X4HP<32, 1> table;
                 for (size_t begin = 16; begin < float_len; begin *= 2)
                 {
                     table.reset(begin / 2);
                     auto it0 = in_out + begin, it1 = it0 + begin - 8, it2 = in + begin, it3 = it2 + begin - 8;
                     for (; it0 < it1; it0 += 8, it1 -= 8, it2 += 8, it3 -= 8)
                     {
-                        // dot_rfftX4(it0, it1, it2, it3, C64X4(inv4, inv4), inv4);
                         dot_rfftX4(it0, it1, it2, it3, table.iterate(), inv4);
                     }
                 }
