@@ -214,7 +214,7 @@ inline std::vector<T> poly_multiply(const std::vector<T> &in1, const std::vector
     std::fill(p1 + len1, p1 + float_len, 0);
     std::fill(p2 + len2, p2 + float_len, 0);
     auto t1 = std::chrono::steady_clock::now();
-    for (int i = 0; i < 100 ; i++)
+    // for (int i = 0; i < 100 ; i++)
     {
         hint::transform::fft::real_conv_avx<true>(p1, p2, float_len);
     }
@@ -300,9 +300,23 @@ void perf_iter()
     auto t2 = std::chrono::steady_clock::now();
     std::cout << "Cost time: " << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "us\n";
 }
+
+void test_table()
+{
+    hint::transform::fft::BinRevTableC64X4HP<32, 2> table1;
+    hint::transform::fft::BinRevTableC64X4HP<32, 1> table2;
+    for (int i = 0; i < 32; i++)
+    {
+        auto t1 = table1.iterate(), t2 = table2.iterate();
+        t1.mul(t1).print();
+        t2.print();
+    }
+}
+
 int main()
 {
     // mul(); // 计算大数乘法
     perf_conv(); // 卷积性能测试
     // perf_iter(); // 迭代法性能测试
+    // test_table(); // 测试逆序表
 }
