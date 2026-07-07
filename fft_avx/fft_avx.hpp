@@ -189,6 +189,12 @@ namespace hint
             using C64 = std::complex<F64>;
             using F64X4 = Float64X4;
             using C64X4 = Complex64X4;
+            template <typename T>
+            static auto getOmega(size_t n, size_t index, T factor)
+            {
+                T theta = -HINT_2PI * index / n;
+                return std::polar<T>(1, theta * factor);
+            }
             template <typename Float, size_t OMEGA_LEN>
             class TableFix
             {
@@ -795,19 +801,13 @@ namespace hint
                 {
                     C64X4 res = table[pop], unit4;
                     index++;
-                    int zero = __builtin_ctzll(index);
+                    int zero = _bit_scan_forward(index);
                     auto fp = reinterpret_cast<const F64 *>(&unit_table.units[zero + 2]);
                     unit4.load1(fp, fp + 1);
                     pop -= zero;
                     table[pop + 1] = table[pop].mul(unit4);
                     pop++;
                     return res;
-                }
-
-                static C64 getOmega(size_t n, size_t index, F64 factor = 1)
-                {
-                    F64 theta = -HINT_2PI * index / n;
-                    return std::polar<F64>(1, theta * factor);
                 }
 
             private:
@@ -859,10 +859,30 @@ namespace hint
                 inout0[0] = c0.real(), inout0[RI_DIFF] = c0.imag();
                 inout1[0] = c1.real(), inout1[RI_DIFF] = c1.imag();
             }
+            // Fast version, inv = 0.5 / float_len
+            template <size_t RI_DIFF = 1, typename FloatTy>
+            inline void dot_rfft_fast(FloatTy *inout0, FloatTy *inout1, const FloatTy *in0, const FloatTy *in1,
+                                      const std::complex<FloatTy> &omega, const FloatTy inv = 1)
+            {
+                using Complex = std::complex<FloatTy>;
+                auto addConj = [](Complex c0, Complex c1)
+                { return Complex(c0.real() + c1.real(), c0.imag() - c1.imag()); };
+                Complex x0(inout0[0], inout0[RI_DIFF]), x1(inout1[0], inout1[RI_DIFF]),
+                    y0(in0[0], in0[RI_DIFF]), y1(in1[0], in1[RI_DIFF]);
+                auto t0 = x0 * y0, t1 = x1 * y1, xy0 = addConj(x0, x1), xy1 = addConj(y0, y1);
+                auto t2 = xy0 * xy1;
+                y1 = addConj(t0, t1);
+                x1 = (y1 + y1 - t2) * omega * omega;
+                const auto inv2 = inv + inv;
+                x0 = (t2 - x1) * inv, x1 = Complex(t0.real() - t1.real(), t0.imag() + t1.imag()) * inv2;
+                Complex out0 = x0 + x1, out1(x0.real() - x1.real(), x1.imag() - x0.imag());
+                inout0[0] = out0.real(), inout0[RI_DIFF] = out0.imag();
+                inout1[0] = out1.real(), inout1[RI_DIFF] = out1.imag();
+            }
             // inv = 0.5 / float_len
             inline void dot_rfftX4(F64 *inout0, F64 *inout1, const F64 *in0, const F64 *in1, const C64X4 &omega, const F64X4 &inv)
             {
-                auto plusConj = [](const C64X4 &x0, const C64X4 &x1)
+                auto addConj = [](const C64X4 &x0, const C64X4 &x1)
                 {
                     return C64X4(x0.real + x1.real, x0.imag - x1.imag);
                 };
@@ -870,12 +890,12 @@ namespace hint
                 x1 = x1.reverse();
                 y1 = y1.reverse();
                 C64X4 t0 = x0.mul(y0), t1 = x1.mul(y1);
-                C64X4 xy0 = plusConj(x0, x1), xy1 = plusConj(y0, y1);
+                C64X4 xy0 = addConj(x0, x1), xy1 = addConj(y0, y1);
                 C64X4 t2 = xy0.mul(xy1);
-                y1 = plusConj(t0, t1); // x0 * y0 + conj(x1 * y1)
+                y1 = addConj(t0, t1); // x0 * y0 + conj(x1 * y1)
                 x1 = (y1 + y1 - t2).mul(omega);
                 const F64X4 inv2 = inv + inv;
-                x0 = (t2 - x1) * inv, x1 = C64X4((t0.real - t1.real) * inv2, (t0.imag + t1.imag) * inv2);
+                x0 = (t2 - x1) * inv, x1 = C64X4(t0.real - t1.real, t0.imag + t1.imag) * inv2;
                 C64X4 out0 = x0 + x1, out1(x0.real - x1.real, x1.imag - x0.imag);
                 out0.store(inout0), out1.reverse().store(inout1);
             }
@@ -957,8 +977,7 @@ namespace hint
                 using Complex = std::complex<Float64>;
                 Float64 inv = 1.0 / float_len;
                 real_dot_binrev<4>(in_out, in, 16, inv);
-                inv = 0.5 / float_len;
-                const Float64X4 inv4 = F64X4(inv);
+                const Float64X4 inv4 = F64X4(0.5 / float_len);
                 BinRevTableC64X4HP<32, 1> table;
                 for (size_t begin = 16; begin < float_len; begin *= 2)
                 {
